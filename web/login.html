@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qoder2api · 登录</title>
+<style>
+  :root {
+    --paper: #faf9f5; --ink: #1a1915; --ink-soft: #5c5a54; --ink-faint: #8b887f;
+    --rule-strong: #d2cec2; --accent: #c15f3c; --accent-soft: #f5e8e2; --err: #a33b2c;
+    --serif: "Tiempos Text", "Copernicus", Charter, "Iowan Old Style",
+             "Palatino Linotype", Palatino, Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--paper); color: var(--ink);
+    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased; padding: 24px;
+  }
+  .box { width: 100%; max-width: 380px; }
+  .kicker {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px;
+  }
+  h1 { font-size: 26px; font-weight: 400; margin: 0 0 8px; letter-spacing: -.015em; }
+  .sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 28px; }
+  label {
+    display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
+  }
+  input {
+    font-family: var(--mono); font-size: 13.5px; padding: 10px 12px; width: 100%;
+    border: 1px solid var(--rule-strong); border-radius: 6px; background: #fff; color: var(--ink);
+  }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  button {
+    font-family: var(--serif); font-size: 14.5px; padding: 10px 18px; width: 100%;
+    margin-top: 18px; border-radius: 6px; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper); cursor: pointer;
+  }
+  button:hover { background: #000; }
+  button:disabled { opacity: .55; cursor: default; }
+  .err { color: var(--err); font-size: 13.5px; margin-top: 14px; min-height: 20px; }
+  .foot {
+    margin-top: 32px; padding-top: 18px; border-top: 1px solid #e3e0d6;
+    font-size: 12.5px; color: var(--ink-faint); line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="kicker">管理后台</div>
+  <h1>qoder2api</h1>
+  <p class="sub">输入管理令牌继续。</p>
+  <form id="f">
+    <label for="t">管理令牌</label>
+    <input id="t" type="password" autocomplete="current-password" placeholder="令牌" required>
+    <button type="submit" id="btn">进入后台</button>
+  </form>
+  <div class="err" id="e"></div>
+  <div class="foot">
+    令牌保存在服务器的 <span style="font-family:var(--mono)">/etc/qoder2api/env</span>。
+    登录后凭证会写入浏览器 Cookie，不再出现在地址栏里。
+  </div>
+</div>
+<script>
+const f = document.getElementById('f');
+const btn = document.getElementById('btn');
+const err = document.getElementById('e');
+
+f.addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const token = document.getElementById('t').value.trim();
+  if (!token) return;
+  btn.disabled = true; err.textContent = '';
+  try {
+    // 带请求头访问 /admin，服务端校验通过后下发 Cookie 并 302 到 /admin
+    const res = await fetch('/admin', { headers: { 'x-admin-token': token }, redirect: 'manual' });
+    if (res.type === 'opaqueredirect' || res.status === 302 || res.status === 0) {
+      location.href = '/admin';
+      return;
+    }
+    err.textContent = res.status === 401 ? '令牌不正确' : '登录失败（' + res.status + '）';
+    btn.disabled = false;
+  } catch (e) {
+    err.textContent = '网络错误：' + e.message;
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

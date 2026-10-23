@@ -292,7 +292,7 @@ async function load() {
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有调用记录</td></tr>';
 
     document.getElementById('model-list').innerHTML = d.models.length
-      ? d.models.map(m => `<span class="pill ok">${esc(m.id)}${m.name && m.name !== m.id ? ' · ' + esc(m.name) : ''}</span>`).join('')
+      ? d.models.map(m => `<span class="pill ok">${esc(m.id)}</span>`).join('')
       : '<div class="empty">管理员未开放任何模型</div>';
 
     document.getElementById('key-info').innerHTML = `

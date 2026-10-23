@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import threading
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -181,16 +184,29 @@ class Handler(BaseHTTPRequestHandler):
         return record, member
 
     def _auth_admin(self) -> bool:
-        token = self.headers.get("x-admin-token", "") or (self._query().get("token") or [""])[0]
+        """管理员鉴权。
+
+        只认请求头或已登录的 Cookie 会话，不接受 URL 参数：
+        令牌放在 ?token= 里会进入浏览器历史、nginx access log 和 Referer，
+        等于把管理凭证发到公网上。
+        """
         if not ADMIN_TOKEN:
             if self.client_address[0] in ("127.0.0.1", "::1"):
                 return True
             self._error(403, "admin_locked", "未配置管理令牌，仅限本机访问")
             return False
-        if token != ADMIN_TOKEN:
-            self._error(401, "admin_denied", "管理令牌错误")
-            return False
-        return True
+
+        token = self.headers.get("x-admin-token", "")
+        if token and secrets.compare_digest(token, ADMIN_TOKEN):
+            return True
+
+        cookies = SimpleCookie(self.headers.get("Cookie", ""))
+        got = cookies.get("q2a_admin")
+        if got and secrets.compare_digest(got.value, self._admin_cookie_value()):
+            return True
+
+        self._error(401, "admin_denied", "请先登录")
+        return False
 
     def _auth_member(self) -> dict | None:
         """成员控制台鉴权：用成员自己的 API Key。"""
@@ -258,9 +274,13 @@ class Handler(BaseHTTPRequestHandler):
                 })
 
             if path in ("/", "/admin"):
+                if not self._auth_admin_page():
+                    return
                 return self._serve_html("admin.html")
             if path in ("/console", "/me"):
                 return self._serve_html("console.html")
+            if path == "/login":
+                return self._serve_html("login.html")
             return self._error(404, "not_found", "接口不存在")
         except Exception as e:  # noqa: BLE001
             return self._error(500, "internal_error", str(e))
@@ -685,6 +705,47 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     # ---------------- 静态页面 ----------------
+
+    def _admin_cookie_value(self) -> str:
+        """管理员页面会话令牌：由管理令牌派生，不直接下发管理令牌本身。"""
+        return hashlib.sha256((ADMIN_TOKEN or "").encode()).hexdigest()[:40]
+
+    def _auth_admin_page(self) -> bool:
+        """管理员页面的访问控制。
+
+        浏览器直接访问 URL 时发不出自定义请求头，所以用 HttpOnly Cookie。
+        首次进入优先看请求头里的令牌，拿到后下发 Cookie 并跳转去掉 URL 中的令牌。
+        """
+        if not ADMIN_TOKEN:
+            if self.client_address[0] in ("127.0.0.1", "::1"):
+                return True
+            self._error(403, "admin_locked", "未配置管理令牌，仅限本机访问")
+            return False
+
+        cookies = SimpleCookie(self.headers.get("Cookie", ""))
+        got = cookies.get("q2a_admin")
+        if got and secrets.compare_digest(got.value, self._admin_cookie_value()):
+            return True
+
+        token = self.headers.get("x-admin-token", "")
+        if token and secrets.compare_digest(token, ADMIN_TOKEN):
+            cookie = f"q2a_admin={self._admin_cookie_value()}"
+            self.send_response(302)
+            self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + "/admin")
+            self.send_header(
+                "Set-Cookie",
+                f"{cookie}; Path=/; Max-Age=43200; HttpOnly; SameSite=Strict"
+                + ("; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""),
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        self.send_response(302)
+        self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + "/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
 
     def _serve_html(self, filename: str):
         path = os.path.join(BASE_DIR, "web", filename)

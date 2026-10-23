@@ -309,15 +309,27 @@ class Store:
     def hash_key(raw: str) -> str:
         return hashlib.sha256(raw.encode()).hexdigest()
 
+    KEY_PREFIX = "sicau-PMT-"
+    KEY_MARKER = "487"
+
+    @classmethod
+    def generate_key(cls) -> str:
+        """生成密钥：前缀 sicau-PMT-，中间必须含连续的 487。
+
+        487 放在随机段的前部固定位置，后面接足够长的随机字符保证熵。
+        """
+        body = secrets.token_urlsafe(32).replace("-", "").replace("_", "")[:30]
+        return f"{cls.KEY_PREFIX}{cls.KEY_MARKER}{body}"
+
     def create_key(self, *, member_id=None, ip_allowlist="", model_allowlist="",
                    note="") -> tuple[int, str]:
-        raw = "qk-" + secrets.token_urlsafe(32)
+        raw = self.generate_key()
         with self._conn() as c:
             cur = c.execute(
                 """INSERT INTO api_keys (key_hash, key_prefix, member_id,
                      ip_allowlist, model_allowlist, note, created_at)
                    VALUES (?,?,?,?,?,?,?)""",
-                (self.hash_key(raw), raw[:11], member_id, ip_allowlist,
+                (self.hash_key(raw), raw[:16], member_id, ip_allowlist,
                  model_allowlist, note, time.time()),
             )
             return int(cur.lastrowid), raw
