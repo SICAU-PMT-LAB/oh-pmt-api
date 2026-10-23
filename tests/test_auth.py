@@ -85,7 +85,9 @@ class KeyFormatTest(unittest.TestCase):
             self.assertIn("487", raw)
             found = store.get_key_by_hash(Store.hash_key(raw))
             self.assertEqual(found["member_id"], mid)
-            self.assertNotIn(raw, str(found))
+            # 明文保留以便随时查看，但哈希不能等于明文
+            self.assertEqual(found["key_value"], raw)
+            self.assertNotEqual(found["key_hash"], raw)
         finally:
             os.unlink(tmp.name)
 
@@ -276,3 +278,104 @@ class MigrationMembersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeyVisibleTest(unittest.TestCase):
+    """管理员要能随时查看完整密钥，不用重建。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.store = Store(self.tmp.name)
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_key_stored_in_plaintext(self):
+        mid = self.store.create_member(name="m")
+        kid, raw = self.store.create_key(member_id=mid)
+        self.assertEqual(self.store.get_key(kid)["key_value"], raw)
+
+    def test_still_hashed_for_lookup(self):
+        mid = self.store.create_member(name="m")
+        kid, raw = self.store.create_key(member_id=mid)
+        k = self.store.get_key(kid)
+        self.assertEqual(k["key_hash"], Store.hash_key(raw))
+        self.assertNotEqual(k["key_hash"], raw)
+
+    def test_list_keys_exposes_value(self):
+        mid = self.store.create_member(name="m")
+        _, raw = self.store.create_key(member_id=mid)
+        self.assertEqual(self.store.list_keys(mid)[0]["key_value"], raw)
+
+    def test_lookup_by_hash_still_works(self):
+        mid = self.store.create_member(name="m")
+        kid, raw = self.store.create_key(member_id=mid)
+        self.assertEqual(self.store.get_key_by_hash(Store.hash_key(raw))["id"], kid)
+
+    def test_migration_adds_key_value(self):
+        import sqlite3
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        try:
+            c = sqlite3.connect(tmp.name)
+            c.executescript("""
+            CREATE TABLE members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+              email TEXT DEFAULT '', enabled INTEGER DEFAULT 1, limit_daily REAL DEFAULT 0,
+              limit_weekly REAL DEFAULT 0, preferred_account_id INTEGER,
+              model_allowlist TEXT DEFAULT '', note TEXT DEFAULT '', created_at REAL NOT NULL);
+            CREATE TABLE api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT,
+              key_hash TEXT NOT NULL UNIQUE, key_prefix TEXT NOT NULL, member_id INTEGER,
+              enabled INTEGER DEFAULT 1, ip_allowlist TEXT DEFAULT '',
+              model_allowlist TEXT DEFAULT '', note TEXT DEFAULT '', created_at REAL NOT NULL);
+            CREATE TABLE usage (id INTEGER PRIMARY KEY AUTOINCREMENT, key_id INTEGER,
+              member_id INTEGER, account_id INTEGER, model TEXT DEFAULT '',
+              prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0,
+              total_tokens INTEGER DEFAULT 0, credits REAL DEFAULT 0,
+              credits_original REAL DEFAULT 0, status INTEGER DEFAULT 200,
+              ip TEXT DEFAULT '', created_at REAL NOT NULL);
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            """ )
+            c.execute("INSERT INTO api_keys (key_hash,key_prefix,created_at) "
+                      "VALUES ('h','sicau-PMT-old',0)")
+            c.commit(); c.close()
+            st = Store(tmp.name)
+            # 旧密钥没有明文，返回空串但不报错
+            self.assertEqual(st.list_keys()[0]["key_value"] or "", "")
+        finally:
+            os.unlink(tmp.name)
+
+
+class MemberDashboardKeyTest(unittest.TestCase):
+    """会话登录时也要拿到自己的密钥，不能是 None。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.store = Store(self.tmp.name)
+        self.patch = mock.patch.object(server, "get_store", lambda: self.store)
+        self.patch.start()
+        self.patch2 = mock.patch.object(server, "all_models", lambda: {})
+        self.patch2.start()
+
+    def tearDown(self):
+        self.patch2.stop()
+        self.patch.stop()
+        os.unlink(self.tmp.name)
+
+    def _ctx(self, member_id):
+        h = make({"Cookie": f"{server.SESSION_COOKIE}={server._sign('m:' + str(member_id))}"})
+        return server.Handler._auth_member(h)
+
+    def test_session_ctx_carries_key(self):
+        mid = self.store.create_member(name="s", username="s")
+        _, raw = self.store.create_key(member_id=mid)
+        ctx = self._ctx(mid)
+        self.assertIsNotNone(ctx["key"])
+        self.assertEqual(ctx["key"]["key_value"], raw)
+
+    def test_dashboard_exposes_key_value(self):
+        mid = self.store.create_member(name="s", username="s")
+        _, raw = self.store.create_key(member_id=mid)
+        data = server.Handler._member_dashboard(make(), self._ctx(mid))
+        self.assertEqual(data["key"]["value"], raw)

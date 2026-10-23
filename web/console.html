@@ -117,6 +117,11 @@
     color: var(--paper); padding: 14px 16px; border-radius: 6px;
     word-break: break-all; margin-top: 10px; line-height: 1.7;
   }
+  button {
+    font-family: var(--serif); font-size: 12.5px; padding: 5px 12px; border-radius: 6px;
+    border: 1px solid var(--rule-strong); background: #fff; color: var(--ink); cursor: pointer;
+  }
+  button:hover { background: var(--paper-raised); }
   .card { border: 1px solid var(--rule); border-radius: 10px; padding: 24px; background: #fff; margin-bottom: 20px; }
   .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
   .note {
@@ -213,6 +218,7 @@ const params = new URLSearchParams(location.search);
 const KEY = params.get('key') || localStorage.getItem('q2a_member_key') || '';
 if (KEY) localStorage.setItem('q2a_member_key', KEY);
 
+let MODEL_NAMES = {};
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = (n, d = 2) => Number(n || 0).toFixed(d);
@@ -288,18 +294,25 @@ async function load() {
     const body = document.getElementById('my-recent');
     body.innerHTML = d.recent.length ? d.recent.map(r => `<tr>
       <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-      <td class="mono">${esc(r.model)}</td>
+      <td>${esc(MODEL_NAMES[r.model] || r.model)}</td>
       <td class="mono">${num(r.credits, 4)}</td>
       <td class="mono">${int(r.total_tokens)}</td>
     </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有调用记录</td></tr>';
 
+    MODEL_NAMES = {};
+    d.models.forEach(m => { MODEL_NAMES[m.id] = m.name; });
     document.getElementById('model-list').innerHTML = d.models.length
-      ? d.models.map(m => `<span class="pill ok">${esc(m.id)}</span>`).join('')
+      ? d.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid #e3e0d6">
+          <span style="min-width:190px">${esc(m.name)}</span>
+          <span class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(m.id)}</span>
+        </div>`).join('')
       : '<div class="empty">管理员未开放任何模型</div>';
 
     document.getElementById('key-info').innerHTML = `
       ${d.member.username ? `<div class="mono">登录账号：${esc(d.member.username)}</div>` : ''}
-      ${d.key.prefix ? `<div class="mono" style="margin-top:8px">密钥前缀：${esc(d.key.prefix)}…</div>` : ''}
+      ${d.key.value ? `<div class="mono" style="margin-top:8px;word-break:break-all">${esc(d.key.value)}</div>
+        <div style="margin-top:6px"><button class="copy-btn" data-key="${esc(d.key.value)}">复制密钥</button></div>`
+        : (d.key.prefix ? `<div class="mono" style="margin-top:8px">密钥前缀：${esc(d.key.prefix)}…</div>` : '')}
       <div class="hint" style="margin-top:10px">允许的来源 IP：${
         d.key.ip_allowlist ? esc(d.key.ip_allowlist) : '不限制'}</div>
       ${d.preferred_account ? `<div class="hint">优先使用的账号：${esc(d.preferred_account)}</div>` : ''}`;
@@ -309,7 +322,7 @@ async function load() {
     document.getElementById('api-url').textContent = base;
     document.getElementById('curl-example').textContent =
 `curl ${base} \\
-  -H "Authorization: Bearer ${d.key.prefix ? d.key.prefix + '...' : '你的密钥'}" \\
+  -H "Authorization: Bearer ${d.key.value || (d.key.prefix ? d.key.prefix + '...' : '你的密钥')}" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
   } catch (e) {
@@ -317,6 +330,17 @@ async function load() {
       `<div class="note">${esc(e.message)}</div>`;
   }
 }
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.copy-btn');
+  if (!btn) return;
+  const text = btn.dataset.key;
+  const done = () => { const o = btn.textContent; btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = o; }, 1400); };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => alert(text));
+  } else { alert(text); }
+});
+
 document.getElementById('logout').addEventListener('click', async e => {
   e.preventDefault();
   localStorage.removeItem('q2a_member_key');

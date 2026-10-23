@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS members (
 CREATE TABLE IF NOT EXISTS api_keys (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     key_hash        TEXT NOT NULL UNIQUE,
+    -- 明文密钥，为了让管理员随时能查看；数据库泄露即等于密钥泄露
+    key_value       TEXT DEFAULT '',
     key_prefix      TEXT NOT NULL,
     member_id       INTEGER,
     enabled         INTEGER DEFAULT 1,
@@ -161,6 +163,7 @@ class Store:
         for name, decl in (
             ("member_id", "INTEGER"),
             ("note", "TEXT DEFAULT ''"),
+            ("key_value", "TEXT DEFAULT ''"),
         ):
             if name not in key_cols:
                 c.execute(f"ALTER TABLE api_keys ADD COLUMN {name} {decl}")
@@ -388,13 +391,18 @@ class Store:
         raw = self.generate_key()
         with self._conn() as c:
             cur = c.execute(
-                """INSERT INTO api_keys (key_hash, key_prefix, member_id,
+                """INSERT INTO api_keys (key_hash, key_value, key_prefix, member_id,
                      ip_allowlist, model_allowlist, note, created_at)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (self.hash_key(raw), raw[:16], member_id, ip_allowlist,
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (self.hash_key(raw), raw, raw[:16], member_id, ip_allowlist,
                  model_allowlist, note, time.time()),
             )
             return int(cur.lastrowid), raw
+
+    def get_key(self, key_id: int) -> dict | None:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM api_keys WHERE id=?", (key_id,)).fetchone()
+            return dict(row) if row else None
 
     def list_keys(self, member_id: int | None = None) -> list[dict]:
         with self._conn() as c:

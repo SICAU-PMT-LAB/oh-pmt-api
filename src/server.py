@@ -233,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
         """成员控制台鉴权：已登录的会话，或成员自己的 API Key。"""
         member = self._session()
         if member:
-            return {"member": member, "key": None, "api_key": self._key_of(member["id"])}
+            return {"member": member, "key": self._key_of(member["id"])}
         return self._auth_by_key()
 
     def _key_of(self, member_id: int) -> dict | None:
@@ -728,6 +728,7 @@ class Handler(BaseHTTPRequestHandler):
                 "preferred_account_id": m["preferred_account_id"],
                 "preferred_account": pref["name"] or pref["email"] if pref else "",
                 "keys": [{"id": k["id"], "prefix": k["key_prefix"],
+                          "key": k["key_value"] or "",
                           "enabled": bool(k["enabled"]),
                           "ip_allowlist": k["ip_allowlist"],
                           "model_allowlist": k["model_allowlist"],
@@ -738,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _analytics(self) -> dict:
         store = get_store()
+        catalog = all_models()
         members = {m["id"]: m["name"] for m in store.list_members()}
         accounts = {a["id"]: (a["name"] or a["email"]) for a in store.list_accounts()}
 
@@ -759,7 +761,9 @@ class Handler(BaseHTTPRequestHandler):
 
         return {
             "daily": store.daily_series(14),
-            "by_model": [{"model": m["model"] or "未知",
+            "by_model": [{"model": (catalog.get(m["model"]) or {}).get("name")
+                                   or m["model"] or "未知",
+                          "id": m["model"] or "",
                           "requests": int(m["n"]),
                           "credits": round(float(m["credits"] or 0), 4),
                           "tokens": int(m["tokens"] or 0)}
@@ -783,7 +787,9 @@ class Handler(BaseHTTPRequestHandler):
                              if a["enabled"] and a["cooldown_until"] < time.time()),
             "members": len(members),
             "keys": len(store.list_keys()),
-            "models": sorted(models),
+            "models": [{"id": mid, "name": models[mid].get("name") or mid}
+                       for mid in sorted(models)],
+            "model_ids": sorted(models),
             "credits_remaining": round(
                 sum(a["credits_remaining"] for a in accounts), 2),
             "credits_total": round(sum(a["credits_total"] for a in accounts), 2),
@@ -804,6 +810,7 @@ class Handler(BaseHTTPRequestHandler):
             },
             "key": {
                 "prefix": (key or {}).get("key_prefix", ""),
+                "value": (key or {}).get("key_value", ""),
                 "ip_allowlist": (key or {}).get("ip_allowlist", ""),
             },
             "quota": guard.quota_status(store, member),

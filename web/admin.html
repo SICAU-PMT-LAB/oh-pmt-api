@@ -451,6 +451,11 @@ const num = (n, d = 2) => Number(n || 0).toFixed(d);
 const int = n => (n || 0).toLocaleString('en-US');
 
 let MEMBERS = [], ACCOUNTS = [], MODELS = {};
+let MODEL_NAMES = {};   // id -> 完整名称
+
+function modelLabel(id) {
+  return MODEL_NAMES[id] || id || '未知';
+}
 
 async function api(path, opts = {}) {
   // 凭证走浏览器 Cookie（HttpOnly），不再从地址栏取令牌
@@ -485,6 +490,29 @@ function show(page) {
 document.querySelectorAll('nav a').forEach(a => {
   a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); });
 });
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.copy-btn');
+  if (btn) copyText(btn.dataset.key, btn);
+});
+
+function copyText(text, btn) {
+  const done = () => {
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = old; }, 1400);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
+  } else fallback(text, done);
+}
+function fallback(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch { alert(text); }
+  document.body.removeChild(ta);
+}
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -521,6 +549,8 @@ function renderHBars(el, rows, nameKey, valueKey, empty) {
 async function loadOverview() {
   try {
     const s = await api('/api/status');
+    MODEL_NAMES = {};
+    (s.models || []).forEach(m => { MODEL_NAMES[m.id] = m.name; });
     const pct = s.credits_total > 0 ? (s.credits_remaining / s.credits_total) * 100 : 0;
     document.getElementById('ov-stats').innerHTML = `
       <div class="stat"><div class="num">${num(s.credits_remaining, 1)}<small>积分</small></div>
@@ -604,7 +634,13 @@ async function loadMembers() {
           ${m.limit_weekly > 0 ? `<div class="${cls(wPct)}"><div style="width:${wPct}%"></div></div>` : ''}</td>
         <td>${m.preferred_account ? esc(m.preferred_account) : '<span style="color:var(--ink-faint)">共用池</span>'}</td>
         <td>${m.keys.length ? m.keys.map(k =>
-              `<div class="mono" style="font-size:11.5px">${esc(k.prefix)}… ${k.enabled ? '' : '<span class="pill off">停用</span>'}</div>`).join('')
+              `<div style="margin-bottom:6px">
+                 <div class="mono" style="font-size:11px;word-break:break-all">${esc(k.key || k.prefix + '…')}</div>
+                 <div style="margin-top:3px">
+                   ${k.enabled ? '' : '<span class="pill off">停用</span>'}
+                   ${k.key ? `<button class="small ghost copy-btn" data-key="${esc(k.key)}">复制</button>` : ''}
+                 </div>
+               </div>`).join('')
             : '<span style="color:var(--ink-faint)">无</span>'}
           <button class="small ghost" onclick="openKeyModal(${m.id},'${esc(m.name)}')">+ 密钥</button></td>
         <td>${m.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill off">停用</span>'}</td>
@@ -711,8 +747,7 @@ async function createKey() {
     });
     document.getElementById('k-result').innerHTML =
       `<div class="keybox">${esc(d.key)}</div>
-       <div class="hint" style="color:var(--warn)">这条密钥只显示一次，现在复制保存。成员用它登录控制台：<br>
-       <span class="mono">/console?key=${esc(d.key.slice(0, 8))}…</span></div>`;
+       <div class="hint">这条密钥保存在成员列表里，随时可以查看和复制。</div>`;
     loadMembers();
   } catch (e) { alert(e.message); }
 }
@@ -817,8 +852,10 @@ async function loadSettings() {
   try {
     const s = await api('/api/status');
     document.getElementById('model-list').innerHTML = s.models.length
-      ? s.models.map(m =>
-          `<span class="pill" style="margin:0 6px 6px 0">${esc(m)}</span>`).join('')
+      ? s.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--rule)">
+          <span style="min-width:200px">${esc(m.name)}</span>
+          <span class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(m.id)}</span>
+        </div>`).join('')
       : '尚未读取到模型';
   } catch (e) {
     document.getElementById('model-list').textContent = e.message;
@@ -834,7 +871,7 @@ async function loadSettings() {
     body.innerHTML = u.recent.slice(0, 30).map(r => `<tr>
       <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
       <td>${esc(nameOf(r.member_id))}</td>
-      <td class="mono">${esc(r.model)}</td>
+      <td>${esc(modelLabel(r.model))}<div class="mono" style="color:var(--ink-faint);font-size:11px">${esc(r.model)}</div></td>
       <td class="mono">${num(r.credits, 4)}</td>
       <td class="mono">${int(r.total_tokens)}</td>
       <td class="mono" style="font-size:11.5px">${esc(r.ip)}</td>
