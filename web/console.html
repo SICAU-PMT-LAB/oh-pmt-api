@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qoder2api · 我的用量</title>
+<style>
+  :root {
+    --paper: #faf9f5;
+    --paper-raised: #f5f3ee;
+    --paper-deep: #efece4;
+    --ink: #1a1915;
+    --ink-soft: #5c5a54;
+    --ink-faint: #8b887f;
+    --rule: #e3e0d6;
+    --rule-strong: #d2cec2;
+    --accent: #c15f3c;
+    --accent-soft: #f5e8e2;
+    --ok: #4a6b52;
+    --warn: #96702f;
+    --err: #a33b2c;
+    --serif: "Tiempos Text", "Copernicus", Charter, "Iowan Old Style",
+             "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC",
+             "Noto Serif CJK SC", serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .layout { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 224px; flex: 0 0 224px; background: var(--paper-deep);
+    border-right: 1px solid var(--rule); padding: 34px 0 24px;
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .brand { padding: 0 24px 26px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
+  .brand .kicker {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
+  }
+  .brand h1 { font-size: 20px; font-weight: 400; margin: 0; }
+  .whoami { padding: 0 24px 20px; }
+  .whoami .name { font-size: 16px; }
+  .whoami .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+  nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+  nav a {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    border-radius: 6px; color: var(--ink-soft); text-decoration: none; font-size: 14.5px;
+    transition: background .14s, color .14s;
+  }
+  nav a:hover { background: #e8e4da; color: var(--ink); }
+  nav a.active { background: var(--ink); color: var(--paper); }
+  nav a .ico { width: 15px; text-align: center; opacity: .75; font-size: 13px; }
+
+  .main { flex: 1; min-width: 0; padding: 40px 48px 80px; }
+  .page { display: none; }
+  .page.active { display: block; animation: fade .2s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  .page-head { margin-bottom: 30px; }
+  .page-head h2 { font-size: 28px; font-weight: 400; margin: 0 0 6px; letter-spacing: -.015em; }
+  .page-head p { margin: 0; color: var(--ink-soft); max-width: 640px; }
+
+  h3 {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+  }
+
+  .quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 26px; }
+  .quota-card {
+    border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; background: #fff;
+  }
+  .quota-card .label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .quota-card .big { font-size: 34px; font-weight: 400; line-height: 1.1; margin: 6px 0 2px; letter-spacing: -.02em; }
+  .quota-card .big small { font-size: 14px; color: var(--ink-faint); margin-left: 4px; }
+  .quota-card .of { font-size: 13.5px; color: var(--ink-soft); }
+  .progress { background: var(--paper-raised); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 12px; }
+  .progress > div { height: 100%; background: var(--ok); border-radius: 4px; transition: width .3s; }
+  .progress.warn > div { background: var(--warn); }
+  .progress.err > div { background: var(--err); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+    padding: 0 12px 9px 0; border-bottom: 1px solid var(--rule-strong); white-space: nowrap;
+  }
+  td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .empty { color: var(--ink-faint); font-style: italic; padding: 20px 0; }
+
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px;
+    padding: 2px 9px; border-radius: 999px; border: 1px solid var(--rule-strong);
+    color: var(--ink-soft); white-space: nowrap; margin: 0 5px 5px 0;
+  }
+  .pill.ok { color: var(--ok); border-color: #c3d2c6; background: #eef3ef; }
+
+  .chart-wrap { background: #fff; border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; margin-bottom: 20px; }
+  .bars { display: flex; align-items: flex-end; gap: 5px; height: 140px; margin-top: 10px; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bar { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; }
+  .bar-lbl { font-family: var(--mono); font-size: 9px; color: var(--ink-faint); }
+  .bar-val { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); }
+
+  .codebox {
+    font-family: var(--mono); font-size: 12.5px; background: var(--ink);
+    color: var(--paper); padding: 14px 16px; border-radius: 6px;
+    word-break: break-all; margin-top: 10px; line-height: 1.7;
+  }
+  .card { border: 1px solid var(--rule); border-radius: 10px; padding: 24px; background: #fff; margin-bottom: 20px; }
+  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 12px 16px; font-size: 13.5px; color: var(--ink-soft);
+    border-radius: 0 6px 6px 0; margin: 16px 0;
+  }
+
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    .sidebar { width: 100%; flex: none; height: auto; position: static; padding: 18px 0; }
+    nav { flex-direction: row; overflow-x: auto; padding: 0 14px; }
+    .brand, .whoami { padding-left: 18px; }
+    .main { padding: 26px 20px 60px; }
+    .quota-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="kicker">成员控制台</div>
+      <h1>qoder2api</h1>
+    </div>
+    <div class="whoami">
+      <div class="name" id="who-name">—</div>
+      <div class="sub" id="who-sub"></div>
+    </div>
+    <nav>
+      <a href="#usage" data-page="usage" class="active"><span class="ico">◈</span>用量</a>
+      <a href="#models" data-page="models"><span class="ico">◇</span>模型</a>
+      <a href="#guide" data-page="guide"><span class="ico">▤</span>接入</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+
+    <section class="page active" id="page-usage">
+      <div class="page-head">
+        <h2>用量</h2>
+        <p>你的积分消耗情况。积分由管理员分配，每天和每周有独立上限。</p>
+      </div>
+      <div class="quota-grid" id="quota-grid"></div>
+      <div class="chart-wrap">
+        <h3>近 14 天积分消耗</h3>
+        <div class="bars" id="my-chart"></div>
+      </div>
+      <div class="card">
+        <h3>最近调用</h3>
+        <table>
+          <thead><tr><th>时间</th><th>模型</th><th>积分</th><th>Tokens</th></tr></thead>
+          <tbody id="my-recent"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="page" id="page-models">
+      <div class="page-head">
+        <h2>可用模型</h2>
+        <p>管理员为你开放的模型。请求其他模型会被拒绝。</p>
+      </div>
+      <div class="card"><div id="model-list"></div></div>
+      <div class="card">
+        <h3>密钥限制</h3>
+        <div id="key-info"></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-guide">
+      <div class="page-head">
+        <h2>接入方式</h2>
+        <p>把下面的地址和密钥填进任意 OpenAI 兼容客户端即可。</p>
+      </div>
+      <div class="card">
+        <h3>接口地址</h3>
+        <div class="codebox" id="api-url">—</div>
+        <h3 style="margin-top:24px">调用示例</h3>
+        <div class="codebox" id="curl-example">—</div>
+        <div class="note">
+          密钥等同于你的账户凭证，不要分享给别人。如果怀疑泄漏，请联系管理员重新生成。
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const KEY = params.get('key') || localStorage.getItem('q2a_member_key') || '';
+if (KEY) localStorage.setItem('q2a_member_key', KEY);
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const num = (n, d = 2) => Number(n || 0).toFixed(d);
+const int = n => (n || 0).toLocaleString('en-US');
+
+async function api(path) {
+  const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + KEY } });
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { data = { error: { message: text } }; }
+  if (!res.ok) throw new Error((data.error && data.error.message) || '请求失败');
+  return data;
+}
+
+function show(page) {
+  document.querySelectorAll('nav a').forEach(a =>
+    a.classList.toggle('active', a.dataset.page === page));
+  document.querySelectorAll('.page').forEach(p =>
+    p.classList.toggle('active', p.id === 'page-' + page));
+}
+document.querySelectorAll('nav a').forEach(a => {
+  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); });
+});
+
+function renderBars(el, data, key, fmt) {
+  const max = Math.max(...data.map(d => d[key]), 0.0001);
+  el.innerHTML = data.map(d => {
+    const h = Math.max(2, (d[key] / max) * 120);
+    return `<div class="bar-col" title="${esc(d.date)}: ${fmt(d[key])}">
+      <div class="bar-val">${d[key] > 0 ? esc(fmt(d[key])) : ''}</div>
+      <div class="bar" style="height:${h}px"></div>
+      <div class="bar-lbl">${esc(d.date)}</div>
+    </div>`;
+  }).join('');
+}
+
+async function load() {
+  if (!KEY) {
+    document.getElementById('quota-grid').innerHTML =
+      '<div class="note">缺少密钥。请使用管理员给你的链接访问，或在地址后附加 <span class="mono">?key=…</span>。</div>';
+    return;
+  }
+  try {
+    const d = await api('/api/me');
+    document.getElementById('who-name').textContent = d.member.name;
+    document.getElementById('who-sub').textContent = d.member.email || '';
+    document.title = d.member.name + ' · qoder2api';
+
+    const q = d.quota;
+    const card = (label, used, limit, left) => {
+      if (!limit) {
+        return `<div class="quota-card">
+          <div class="label">${label}</div>
+          <div class="big">${num(used)}<small>积分</small></div>
+          <div class="of">不限上限</div>
+        </div>`;
+      }
+      const pct = Math.min(100, (used / limit) * 100);
+      const cls = pct >= 95 ? 'progress err' : pct >= 70 ? 'progress warn' : 'progress';
+      return `<div class="quota-card">
+        <div class="label">${label}</div>
+        <div class="big">${num(left)}<small>剩余</small></div>
+        <div class="of">已用 ${num(used)} / 上限 ${num(limit)}</div>
+        <div class="${cls}"><div style="width:${pct}%"></div></div>
+      </div>`;
+    };
+    document.getElementById('quota-grid').innerHTML =
+      card('今日积分', q.used_today, q.limit_daily, q.left_today) +
+      card('本周积分', q.used_week, q.limit_weekly, q.left_week);
+
+    renderBars(document.getElementById('my-chart'), d.daily, 'credits', v => v.toFixed(2));
+
+    const body = document.getElementById('my-recent');
+    body.innerHTML = d.recent.length ? d.recent.map(r => `<tr>
+      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+      <td class="mono">${esc(r.model)}</td>
+      <td class="mono">${num(r.credits, 4)}</td>
+      <td class="mono">${int(r.total_tokens)}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有调用记录</td></tr>';
+
+    document.getElementById('model-list').innerHTML = d.models.length
+      ? d.models.map(m => `<span class="pill ok">${esc(m.id)}${m.name && m.name !== m.id ? ' · ' + esc(m.name) : ''}</span>`).join('')
+      : '<div class="empty">管理员未开放任何模型</div>';
+
+    document.getElementById('key-info').innerHTML = `
+      <div class="mono">密钥前缀：${esc(d.key.prefix)}…</div>
+      <div class="hint" style="margin-top:10px">允许的来源 IP：${
+        d.key.ip_allowlist ? esc(d.key.ip_allowlist) : '不限制'}</div>
+      ${d.preferred_account ? `<div class="hint">优先使用的账号：${esc(d.preferred_account)}</div>` : ''}`;
+
+    const base = location.origin + '/v1/chat/completions';
+    const model = d.models.length ? d.models[0].id : 'qfmodel';
+    document.getElementById('api-url').textContent = base;
+    document.getElementById('curl-example').textContent =
+`curl ${base} \\
+  -H "Authorization: Bearer ${d.key.prefix}..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
+  } catch (e) {
+    document.getElementById('quota-grid').innerHTML =
+      `<div class="note">${esc(e.message)}</div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

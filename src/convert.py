@@ -57,8 +57,14 @@ def iter_chunks(lines, usage_holder: dict | None = None):
         except json.JSONDecodeError:
             continue
         if isinstance(inner, dict) and usage_holder is not None:
-            if inner.get("usage") and not usage_holder.get("usage"):
-                usage_holder["usage"] = inner["usage"]
+            usage = inner.get("usage")
+            if usage:
+                # 上游在最后一帧给出 usage，含本次消耗的 credits（积分）
+                usage_holder["usage"] = usage
+                if usage.get("credits") is not None:
+                    usage_holder["credits"] = float(usage["credits"])
+                if usage.get("original_credits") is not None:
+                    usage_holder["credits_original"] = float(usage["original_credits"])
         yield body
 
 
@@ -125,5 +131,6 @@ def aggregate(lines, model: str, usage_holder: dict | None = None) -> dict:
             "prompt_tokens": int(usage.get("prompt_tokens") or 0),
             "completion_tokens": int(usage.get("completion_tokens") or 0),
             "total_tokens": int(usage.get("total_tokens") or 0),
+            "credits": float(usage.get("credits") or 0),
         },
     }

@@ -1,4 +1,4 @@
-"""HTTP 服务：OpenAI 兼容接口 + 管理 API。"""
+"""HTTP 服务：OpenAI 兼容接口 + 管理 API + 成员控制台。"""
 
 from __future__ import annotations
 
@@ -6,9 +6,8 @@ import json
 import os
 import threading
 import time
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import convert
 import guard
@@ -23,7 +22,6 @@ STORE: Store | None = None
 TRUST_FORWARDED = os.environ.get("Q2A_TRUST_FORWARDED", "0") == "1"
 ADMIN_TOKEN = os.environ.get("Q2A_ADMIN_TOKEN", "")
 
-# 模型清单缓存：region -> (timestamp, list)
 _MODEL_CACHE: dict[str, tuple[float, list]] = {}
 _MODEL_LOCK = threading.Lock()
 _REFRESH_LOCK = threading.Lock()
@@ -38,11 +36,11 @@ def get_store() -> Store:
 
 
 # ---------------------------------------------------------------------------
-# 凭证维护
+# 凭证与积分维护
 # ---------------------------------------------------------------------------
 
 def ensure_fresh_token(account: dict) -> dict:
-    """必要时刷新 job token。PAT → jobToken 只有 24 小时，不刷新就失效。"""
+    """必要时刷新 job token。PAT 换来的令牌只有 24 小时。"""
     if account["expires_at"] and account["expires_at"] - time.time() > 300:
         return account
 
@@ -52,7 +50,6 @@ def ensure_fresh_token(account: dict) -> dict:
             return fresh
         acc = fresh or account
 
-        # 优先用 refresh_token，失败回退到 PAT 重换
         new = None
         if acc["refresh_token"]:
             try:
@@ -76,6 +73,21 @@ def ensure_fresh_token(account: dict) -> dict:
         return acc
 
 
+def sync_account_credits(account: dict) -> dict | None:
+    """从上游拉取积分快照并落库。"""
+    try:
+        acc = ensure_fresh_token(account)
+        q = qoder.fetch_quota(acc)
+    except Exception:  # noqa: BLE001
+        return None
+    get_store().set_account_credits(
+        account["id"],
+        total=q["total"], used=q["used"], remaining=q["remaining"],
+        addon=q["addon_remaining"], plan=q["plan"],
+    )
+    return q
+
+
 def models_for_region(region: str, account: dict | None = None) -> list[dict]:
     with _MODEL_LOCK:
         hit = _MODEL_CACHE.get(region)
@@ -88,30 +100,40 @@ def models_for_region(region: str, account: dict | None = None) -> list[dict]:
     try:
         acc = ensure_fresh_token(account)
         items = qoder.list_models(acc)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
     with _MODEL_LOCK:
         _MODEL_CACHE[region] = (time.time(), items)
     return items
 
 
+def all_models() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for region in ("global", "cn"):
+        for m in models_for_region(region):
+            out.setdefault(m["id"], {**m, "region": region})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 请求处理
+# ---------------------------------------------------------------------------
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "qoder2api"
     protocol_version = "HTTP/1.1"
-
-    # ---------------- 基础工具 ----------------
 
     def log_message(self, fmt, *args):
         if os.environ.get("Q2A_ACCESS_LOG") == "1":
             super().log_message(fmt, *args)
 
-    def _send_json(self, status: int, payload, extra_headers=None):
+    # ---------------- 基础工具 ----------------
+
+    def _send_json(self, status: int, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        for k, v in (extra_headers or {}).items():
-            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -130,9 +152,12 @@ class Handler(BaseHTTPRequestHandler):
     def _client_ip(self) -> str:
         return guard.client_ip(self, TRUST_FORWARDED)
 
+    def _query(self) -> dict:
+        return parse_qs(urlparse(self.path).query)
+
     # ---------------- 鉴权 ----------------
 
-    def _auth_key(self) -> dict | None:
+    def _auth_key(self) -> tuple[dict, dict | None] | None:
         header = self.headers.get("Authorization", "")
         raw = header[7:].strip() if header.lower().startswith("bearer ") else ""
         if not raw:
@@ -147,12 +172,17 @@ class Handler(BaseHTTPRequestHandler):
         if not record["enabled"]:
             self._error(403, "api_key_disabled", "API Key 已停用")
             return None
-        return record
+        member = None
+        if record["member_id"]:
+            member = get_store().get_member(record["member_id"])
+            if not member or not member["enabled"]:
+                self._error(403, "member_disabled", "所属成员已停用")
+                return None
+        return record, member
 
     def _auth_admin(self) -> bool:
-        token = self.headers.get("x-admin-token", "")
+        token = self.headers.get("x-admin-token", "") or (self._query().get("token") or [""])[0]
         if not ADMIN_TOKEN:
-            # 未设管理令牌时只允许本机访问
             if self.client_address[0] in ("127.0.0.1", "::1"):
                 return True
             self._error(403, "admin_locked", "未配置管理令牌，仅限本机访问")
@@ -161,6 +191,25 @@ class Handler(BaseHTTPRequestHandler):
             self._error(401, "admin_denied", "管理令牌错误")
             return False
         return True
+
+    def _auth_member(self) -> dict | None:
+        """成员控制台鉴权：用成员自己的 API Key。"""
+        header = self.headers.get("Authorization", "")
+        raw = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if not raw:
+            raw = (self._query().get("key") or [""])[0]
+        if not raw:
+            self._error(401, "missing_api_key", "请提供 API Key")
+            return None
+        record = get_store().get_key_by_hash(Store.hash_key(raw))
+        if not record or not record["member_id"]:
+            self._error(401, "invalid_api_key", "API Key 无效")
+            return None
+        member = get_store().get_member(record["member_id"])
+        if not member:
+            self._error(404, "member_not_found", "成员不存在")
+            return None
+        return {"key": record, "member": member}
 
     # ---------------- 路由 ----------------
 
@@ -171,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"status": "ok", "time": int(time.time())})
             if path == "/v1/models":
                 return self._v1_models()
+
+            # 管理接口
             if path == "/api/status":
                 if not self._auth_admin():
                     return
@@ -179,19 +230,37 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._auth_admin():
                     return
                 return self._send_json(200, {"accounts": self._accounts_view()})
-            if path == "/api/keys":
+            if path == "/api/members":
                 if not self._auth_admin():
                     return
-                return self._send_json(200, {"keys": self._keys_view()})
+                return self._send_json(200, {"members": self._members_view()})
+            if path == "/api/analytics":
+                if not self._auth_admin():
+                    return
+                return self._send_json(200, self._analytics())
             if path == "/api/usage":
                 if not self._auth_admin():
                     return
+                return self._send_json(200, {"recent": get_store().recent_usage(100)})
+
+            # 成员控制台数据
+            if path == "/api/me":
+                ctx = self._auth_member()
+                if ctx is None:
+                    return
+                return self._send_json(200, self._member_dashboard(ctx))
+            if path == "/api/me/usage":
+                ctx = self._auth_member()
+                if ctx is None:
+                    return
                 return self._send_json(200, {
-                    "summary": get_store().usage_summary(),
-                    "recent": get_store().recent_usage(100),
+                    "recent": get_store().usage_for_member(ctx["member"]["id"], 100)
                 })
+
             if path in ("/", "/admin"):
-                return self._serve_dashboard()
+                return self._serve_html("admin.html")
+            if path in ("/console", "/me"):
+                return self._serve_html("console.html")
             return self._error(404, "not_found", "接口不存在")
         except Exception as e:  # noqa: BLE001
             return self._error(500, "internal_error", str(e))
@@ -201,21 +270,32 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/v1/chat/completions":
                 return self._chat_completions()
+
             if path == "/api/accounts":
                 if not self._auth_admin():
                     return
                 return self._add_account()
-            if path == "/api/keys":
-                if not self._auth_admin():
-                    return
-                return self._create_key_route()
             if path == "/api/accounts/action":
                 if not self._auth_admin():
                     return
                 return self._account_action()
+            if path == "/api/accounts/sync":
+                if not self._auth_admin():
+                    return
+                return self._sync_credits()
+            if path == "/api/members":
+                if not self._auth_admin():
+                    return
+                return self._create_member()
+            if path == "/api/keys":
+                if not self._auth_admin():
+                    return
+                return self._create_key()
             return self._error(404, "not_found", "接口不存在")
         except guard.Denied as e:
             return self._error(e.status, e.code, e.message)
+        except qoder.UpstreamError as e:
+            return self._error(400, "upstream_error", str(e))
         except Exception as e:  # noqa: BLE001
             return self._error(500, "internal_error", str(e))
 
@@ -223,19 +303,25 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._auth_admin():
             return
-        if path.startswith("/api/keys/"):
-            try:
-                key_id = int(path.rsplit("/", 1)[-1])
-            except ValueError:
-                return self._error(400, "bad_request", "Key ID 无效")
-            body = self._read_json()
-            fields = {}
-            for k in ("label", "enabled", "token_limit_daily", "token_limit_total",
-                      "ip_allowlist", "model_allowlist"):
-                if k in body:
-                    fields[k] = body[k]
-            get_store().update_key(key_id, **fields)
-            return self._send_json(200, {"ok": True})
+        body = self._read_json()
+        try:
+            if path.startswith("/api/members/"):
+                mid = int(path.rsplit("/", 1)[-1])
+                fields = {k: body[k] for k in
+                          ("name", "email", "enabled", "limit_daily", "limit_weekly",
+                           "preferred_account_id", "model_allowlist", "note")
+                          if k in body}
+                get_store().update_member(mid, **fields)
+                return self._send_json(200, {"ok": True})
+            if path.startswith("/api/keys/"):
+                kid = int(path.rsplit("/", 1)[-1])
+                fields = {k: body[k] for k in
+                          ("enabled", "ip_allowlist", "model_allowlist", "note")
+                          if k in body}
+                get_store().update_key(kid, **fields)
+                return self._send_json(200, {"ok": True})
+        except ValueError:
+            return self._error(400, "bad_request", "ID 无效")
         return self._error(404, "not_found", "接口不存在")
 
     def do_DELETE(self):
@@ -243,6 +329,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth_admin():
             return
         try:
+            if path.startswith("/api/members/"):
+                get_store().delete_member(int(path.rsplit("/", 1)[-1]))
+                return self._send_json(200, {"ok": True})
             if path.startswith("/api/keys/"):
                 get_store().delete_key(int(path.rsplit("/", 1)[-1]))
                 return self._send_json(200, {"ok": True})
@@ -256,24 +345,30 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- OpenAI 兼容 ----------------
 
     def _v1_models(self):
-        if not self._auth_key():
+        auth = self._auth_key()
+        if auth is None:
             return
-        seen: dict[str, dict] = {}
-        for region in ("global", "cn"):
-            for m in models_for_region(region):
-                seen.setdefault(m["id"], {"id": m["id"], "object": "model",
-                                          "owned_by": f"qoder-{region}"})
-        return self._send_json(200, {"object": "list", "data": list(seen.values())})
+        key, member = auth
+        allowed = guard.allowed_models(key, member)
+        data = []
+        for mid, m in all_models().items():
+            if allowed and mid not in allowed:
+                continue
+            data.append({"id": mid, "object": "model",
+                         "owned_by": f"qoder-{m.get('region', 'global')}"})
+        return self._send_json(200, {"object": "list", "data": data})
 
     def _chat_completions(self):
-        key = self._auth_key()
-        if key is None:
+        auth = self._auth_key()
+        if auth is None:
             return
+        key, member = auth
         ip = self._client_ip()
+        store = get_store()
 
         try:
             guard.check_ip(key, ip)
-            guard.check_quota(get_store(), key)
+            guard.check_quota(store, member)
         except guard.Denied as e:
             return self._error(e.status, e.code, e.message)
 
@@ -284,15 +379,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_request", "缺少 model 或 messages")
 
         try:
-            guard.check_model(key, model)
+            guard.check_model(key, member, model)
         except guard.Denied as e:
             return self._error(e.status, e.code, e.message)
 
         stream = bool(body.get("stream"))
         region = "cn" if model.endswith("-cn") else "global"
-
-        account = get_store().pick_account(region) or get_store().pick_account(
-            "cn" if region == "global" else "global"
+        prefer = member.get("preferred_account_id") if member else None
+        account = store.pick_account(region, prefer) or store.pick_account(
+            "cn" if region == "global" else "global", prefer
         )
         if account is None:
             return self._error(503, "no_account", f"{region} 区域没有可用账号")
@@ -306,15 +401,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             lines = qoder.chat_stream(account, payload, model)
         except qoder.UpstreamError as e:
-            get_store().set_account_cooldown(account["id"], 60, str(e))
+            store.set_account_cooldown(account["id"], 60, str(e))
             return self._error(502, "upstream_error", str(e))
-        except Exception as e:  # noqa: BLE001
-            get_store().set_account_cooldown(account["id"], 60, str(e))
-            return self._error(500, "proxy_error", str(e))
 
-        get_store().touch_account(account["id"])
-        usage_holder: dict = {}
-        started = time.time()
+        store.touch_account(account["id"])
+        holder: dict = {}
 
         try:
             if stream:
@@ -324,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 try:
-                    for chunk_json in convert.iter_chunks(lines, usage_holder):
+                    for chunk_json in convert.iter_chunks(lines, holder):
                         self.wfile.write(convert.to_sse(chunk_json))
                         self.wfile.flush()
                     self.wfile.write(convert.DONE)
@@ -337,19 +428,23 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 self.close_connection = True
             else:
-                result = convert.aggregate(lines, model, usage_holder)
-                self._send_json(200, result)
+                self._send_json(200, convert.aggregate(lines, model, holder))
         finally:
-            usage = usage_holder.get("usage") or {}
-            get_store().record_usage(
-                key_id=key["id"], account_id=account["id"], model=model,
+            usage = holder.get("usage") or {}
+            store.record_usage(
+                key_id=key["id"],
+                member_id=key["member_id"],
+                account_id=account["id"],
+                model=model,
                 prompt_tokens=int(usage.get("prompt_tokens") or 0),
                 completion_tokens=int(usage.get("completion_tokens") or 0),
-                status=200, ip=ip,
+                credits=float(holder.get("credits") or 0),
+                credits_original=float(holder.get("credits_original") or 0),
+                status=200,
+                ip=ip,
             )
-            _ = started
 
-    # ---------------- 管理接口 ----------------
+    # ---------------- 管理接口实现 ----------------
 
     def _add_account(self):
         body = self._read_json()
@@ -359,12 +454,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_region", "区域只能是 global 或 cn")
         if not pat.startswith("pt-"):
             return self._error(400, "bad_pat", "PAT 应以 pt- 开头")
-        try:
-            ex = qoder.exchange_pat(pat, region)
-            info = qoder.fetch_userinfo(ex["access_token"], region)
-        except qoder.UpstreamError as e:
-            return self._error(400, "pat_invalid", str(e))
 
+        ex = qoder.exchange_pat(pat, region)
+        info = qoder.fetch_userinfo(ex["access_token"], region)
         if not info["uid"]:
             return self._error(400, "uid_missing", "无法获取账号 UID")
 
@@ -376,6 +468,9 @@ class Handler(BaseHTTPRequestHandler):
         get_store().set_account_tokens(
             account_id, ex["access_token"], ex["refresh_token"], expires_at
         )
+        acc = get_store().get_account(account_id)
+        if acc:
+            sync_account_credits(acc)
         return self._send_json(200, {"ok": True, "account": {
             "uid": info["uid"], "email": info["email"],
             "name": info["name"], "region": region,
@@ -404,20 +499,63 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_action", "未知操作")
         return self._send_json(200, {"ok": True})
 
-    def _create_key_route(self):
+    def _sync_credits(self):
         body = self._read_json()
+        targets = ([get_store().get_account(int(body["id"]))] if body.get("id")
+                   else get_store().list_accounts())
+        out = []
+        for acc in targets:
+            if not acc:
+                continue
+            q = sync_account_credits(acc)
+            out.append({"id": acc["id"], "ok": bool(q), "quota": q})
+        return self._send_json(200, {"results": out})
+
+    def _create_member(self):
+        body = self._read_json()
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._error(400, "bad_request", "成员名字不能为空")
+        mid = get_store().create_member(
+            name=name,
+            email=(body.get("email") or "").strip(),
+            limit_daily=float(body.get("limit_daily") or 0),
+            limit_weekly=float(body.get("limit_weekly") or 0),
+            preferred_account_id=body.get("preferred_account_id") or None,
+            model_allowlist=(body.get("model_allowlist")
+                             if body.get("model_allowlist") is not None
+                             else "qfmodel,gfmodel,dfmodel"),
+            note=(body.get("note") or "").strip(),
+        )
+        return self._send_json(200, {"ok": True, "id": mid})
+
+    def _create_key(self):
+        body = self._read_json()
+        member_id = body.get("member_id")
+        if not member_id:
+            return self._error(400, "bad_request", "必须指定成员")
         key_id, raw = get_store().create_key(
-            label=(body.get("label") or "").strip(),
-            token_limit_daily=int(body.get("token_limit_daily") or 0),
-            token_limit_total=int(body.get("token_limit_total") or 0),
+            member_id=int(member_id),
             ip_allowlist=(body.get("ip_allowlist") or "").strip(),
             model_allowlist=(body.get("model_allowlist") or "").strip(),
+            note=(body.get("note") or "").strip(),
         )
         return self._send_json(200, {"ok": True, "id": key_id, "key": raw})
 
+    # ---------------- 视图 ----------------
+
     def _accounts_view(self) -> list[dict]:
+        store = get_store()
+        consumed = store.credits_by_account()
+        all_members = store.list_members()
+        # 账号 -> 绑定到它的成员名字
+        bound_map: dict[int, list[str]] = {}
+        for m in all_members:
+            pid = m["preferred_account_id"]
+            if pid:
+                bound_map.setdefault(pid, []).append(m["name"])
         out = []
-        for a in get_store().list_accounts():
+        for a in store.list_accounts():
             out.append({
                 "id": a["id"], "uid": a["uid"], "region": a["region"],
                 "email": a["email"], "name": a["name"],
@@ -425,41 +563,133 @@ class Handler(BaseHTTPRequestHandler):
                 "cooldown": max(0, int(a["cooldown_until"] - time.time())),
                 "last_error": a["last_error"],
                 "expires_in": max(0, int(a["expires_at"] - time.time())),
+                "credits_total": a["credits_total"],
+                "credits_used": a["credits_used"],
+                "credits_remaining": a["credits_remaining"],
+                "credits_addon": a["credits_addon"],
+                "plan_name": a["plan_name"],
+                "synced_ago": (max(0, int(time.time() - a["credits_synced_at"]))
+                               if a["credits_synced_at"] else None),
+                "gateway_consumed": round(consumed.get(a["id"], 0.0), 4),
+                "bound_members": bound_map.get(a["id"], []),
             })
         return out
 
-    def _keys_view(self) -> list[dict]:
+    def _members_view(self) -> list[dict]:
         store = get_store()
+        accounts = {a["id"]: a for a in store.list_accounts()}
         out = []
-        for k in store.list_keys():
+        for m in store.list_members():
+            st = guard.quota_status(store, m)
+            keys = store.list_keys(m["id"])
+            pref = accounts.get(m["preferred_account_id"] or 0)
             out.append({
-                "id": k["id"], "prefix": k["key_prefix"], "label": k["label"],
-                "enabled": bool(k["enabled"]),
-                "token_limit_daily": k["token_limit_daily"],
-                "token_limit_total": k["token_limit_total"],
-                "ip_allowlist": k["ip_allowlist"],
-                "model_allowlist": k["model_allowlist"],
-                "used_today": store.tokens_used_since(k["id"], time.time() - 86400),
-                "used_total": store.tokens_used_total(k["id"]),
+                "id": m["id"], "name": m["name"], "email": m["email"],
+                "enabled": bool(m["enabled"]),
+                "limit_daily": st["limit_daily"],
+                "limit_weekly": st["limit_weekly"],
+                "used_today": st["used_today"],
+                "used_week": st["used_week"],
+                "left_today": st["left_today"],
+                "left_week": st["left_week"],
+                "used_total": round(store.credits_total(m["id"]), 4),
+                "model_allowlist": m["model_allowlist"],
+                "note": m["note"],
+                "preferred_account_id": m["preferred_account_id"],
+                "preferred_account": pref["name"] or pref["email"] if pref else "",
+                "keys": [{"id": k["id"], "prefix": k["key_prefix"],
+                          "enabled": bool(k["enabled"]),
+                          "ip_allowlist": k["ip_allowlist"],
+                          "model_allowlist": k["model_allowlist"],
+                          "note": k["note"]}
+                         for k in keys],
             })
         return out
+
+    def _analytics(self) -> dict:
+        store = get_store()
+        members = {m["id"]: m["name"] for m in store.list_members()}
+        accounts = {a["id"]: (a["name"] or a["email"]) for a in store.list_accounts()}
+
+        per_member = []
+        for row in store.member_summary():
+            mid = row["member_id"]
+            per_member.append({
+                "name": members.get(mid, "未关联"),
+                "requests": int(row["n"]),
+                "credits": round(float(row["credits"] or 0), 4),
+                "tokens": int(row["tokens"] or 0),
+            })
+        per_member.sort(key=lambda x: x["credits"], reverse=True)
+
+        # 账号归属：每个账号被消耗多少积分
+        consumed = store.credits_by_account()
+        by_account = [{"name": accounts.get(aid, f"账号 {aid}"),
+                       "credits": round(v, 4)} for aid, v in consumed.items()]
+
+        return {
+            "daily": store.daily_series(14),
+            "by_model": [{"model": m["model"] or "未知",
+                          "requests": int(m["n"]),
+                          "credits": round(float(m["credits"] or 0), 4),
+                          "tokens": int(m["tokens"] or 0)}
+                         for m in store.model_summary()],
+            "by_member": per_member,
+            "by_account": by_account,
+            "totals": {
+                "requests": sum(d["requests"] for d in store.daily_series(30)),
+                "credits_7d": round(sum(m["credits"] for m in per_member), 4),
+            },
+        }
 
     def _admin_status(self) -> dict:
-        accounts = get_store().list_accounts()
-        models = []
-        if accounts:  # 没有账号时不必去上游拉清单
-            for region in ("global", "cn"):
-                models.extend(models_for_region(region))
-        return {"accounts": len(accounts),
-                "available": sum(1 for a in accounts
-                                 if a["enabled"] and a["cooldown_until"] < time.time()),
-                "keys": len(get_store().list_keys()),
-                "models": sorted({m["id"] for m in models})}
+        store = get_store()
+        accounts = store.list_accounts()
+        members = store.list_members()
+        models = all_models() if accounts else {}
+        return {
+            "accounts": len(accounts),
+            "available": sum(1 for a in accounts
+                             if a["enabled"] and a["cooldown_until"] < time.time()),
+            "members": len(members),
+            "keys": len(store.list_keys()),
+            "models": sorted(models),
+            "credits_remaining": round(
+                sum(a["credits_remaining"] for a in accounts), 2),
+            "credits_total": round(sum(a["credits_total"] for a in accounts), 2),
+        }
 
-    def _serve_dashboard(self):
-        path = os.path.join(BASE_DIR, "web", "index.html")
+    def _member_dashboard(self, ctx: dict) -> dict:
+        store = get_store()
+        member = ctx["member"]
+        key = ctx["key"]
+        accounts = {a["id"]: a for a in store.list_accounts()}
+        allowed = guard.allowed_models(key, member)
+        models = all_models()
+        return {
+            "member": {
+                "id": member["id"], "name": member["name"],
+                "email": member["email"],
+                "model_allowlist": sorted(allowed),
+            },
+            "key": {"prefix": key["key_prefix"], "ip_allowlist": key["ip_allowlist"]},
+            "quota": guard.quota_status(store, member),
+            "preferred_account": (
+                accounts.get(member["preferred_account_id"]) or {}
+            ).get("name", ""),
+            "models": [{"id": mid, "name": m.get("name", mid)}
+                       for mid, m in sorted(models.items())
+                       if not allowed or mid in allowed],
+            "daily": store.daily_series(14),
+            "recent": store.usage_for_member(member["id"], 20),
+        }
+
+    # ---------------- 静态页面 ----------------
+
+    def _serve_html(self, filename: str):
+        path = os.path.join(BASE_DIR, "web", filename)
         if not os.path.exists(path):
-            return self._error(404, "not_found", "管理界面未找到")
+            return self._error(404, "not_found", "页面未找到")
         with open(path, "rb") as f:
             body = f.read()
         self.send_response(200)

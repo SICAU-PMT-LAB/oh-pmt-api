@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qoder2api · 管理后台</title>
+<style>
+  :root {
+    --paper: #faf9f5;
+    --paper-raised: #f5f3ee;
+    --paper-deep: #efece4;
+    --ink: #1a1915;
+    --ink-soft: #5c5a54;
+    --ink-faint: #8b887f;
+    --rule: #e3e0d6;
+    --rule-strong: #d2cec2;
+    --accent: #c15f3c;
+    --accent-soft: #f5e8e2;
+    --ok: #4a6b52;
+    --warn: #96702f;
+    --err: #a33b2c;
+    --serif: "Tiempos Text", "Copernicus", Charter, "Iowan Old Style",
+             "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC",
+             "Noto Serif CJK SC", serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .layout { display: flex; min-height: 100vh; }
+
+  /* ---------- 左侧导航 ---------- */
+  .sidebar {
+    width: 232px; flex: 0 0 232px;
+    background: var(--paper-deep);
+    border-right: 1px solid var(--rule);
+    padding: 34px 0 24px;
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .brand { padding: 0 24px 26px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
+  .brand .kicker {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
+  }
+  .brand h1 { font-size: 21px; font-weight: 400; margin: 0; letter-spacing: -0.01em; }
+  nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+  nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 6px;
+    color: var(--ink-soft); text-decoration: none; font-size: 14.5px;
+    transition: background .14s, color .14s;
+  }
+  nav a:hover { background: #e8e4da; color: var(--ink); }
+  nav a.active { background: var(--ink); color: var(--paper); }
+  nav a .ico { width: 15px; text-align: center; opacity: .75; font-size: 13px; }
+  .sidebar-foot {
+    margin-top: auto; padding: 18px 24px 0;
+    border-top: 1px solid var(--rule);
+    font-size: 12px; color: var(--ink-faint); line-height: 1.5;
+  }
+
+  /* ---------- 主区 ---------- */
+  .main { flex: 1; min-width: 0; padding: 40px 48px 80px; }
+  .page { display: none; }
+  .page.active { display: block; animation: fade .2s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  .page-head { margin-bottom: 32px; }
+  .page-head h2 { font-size: 29px; font-weight: 400; margin: 0 0 6px; letter-spacing: -0.015em; }
+  .page-head p { margin: 0; color: var(--ink-soft); font-size: 15px; max-width: 660px; }
+
+  h3 {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+  }
+
+  .stat-row { display: flex; gap: 48px; flex-wrap: wrap; margin-bottom: 36px; }
+  .stat .num { font-size: 34px; font-weight: 400; line-height: 1.05; letter-spacing: -0.02em; }
+  .stat .num small { font-size: 15px; color: var(--ink-faint); margin-left: 3px; }
+  .stat .lbl {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-faint); margin-top: 6px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+    padding: 0 14px 9px 0; border-bottom: 1px solid var(--rule-strong); white-space: nowrap;
+  }
+  td { padding: 13px 14px 13px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .empty { color: var(--ink-faint); font-style: italic; padding: 20px 0; }
+
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: .05em; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid var(--rule-strong); color: var(--ink-soft); white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: #c3d2c6; background: #eef3ef; }
+  .pill.off { color: var(--ink-faint); background: var(--paper-raised); }
+  .pill.err { color: var(--err); border-color: #e0c4bf; background: #f8ece9; }
+  .pill.warn { color: var(--warn); border-color: #ddcfb0; background: #f8f2e6; }
+
+  button {
+    font-family: var(--serif); font-size: 13.5px; padding: 7px 15px;
+    border-radius: 6px; border: 1px solid var(--rule-strong);
+    background: var(--paper); color: var(--ink); cursor: pointer;
+    transition: background .14s, border-color .14s;
+  }
+  button:hover { background: var(--paper-raised); border-color: var(--ink-faint); }
+  button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  button.primary:hover { background: #000; }
+  button.small { font-size: 11.5px; padding: 3px 9px; }
+  button.ghost { border-color: transparent; background: transparent; color: var(--ink-soft); }
+  button.ghost:hover { background: var(--paper-raised); }
+
+  input, textarea, select {
+    font-family: var(--serif); font-size: 14.5px; padding: 8px 11px;
+    border: 1px solid var(--rule-strong); border-radius: 6px;
+    background: #fff; color: var(--ink); width: 100%;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  input::placeholder { font-size: 13.5px; color: var(--ink-faint); opacity: .72; }
+  label {
+    display: block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 5px;
+  }
+  .field { margin-bottom: 16px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 5px; line-height: 1.5; }
+
+  .card {
+    border: 1px solid var(--rule); border-radius: 10px;
+    padding: 24px; background: #fff; margin-bottom: 20px;
+  }
+  .card tight { padding: 0; }
+
+  .keybox {
+    font-family: var(--mono); font-size: 12.5px; background: var(--ink);
+    color: var(--paper); padding: 13px 15px; border-radius: 6px;
+    word-break: break-all; margin-top: 10px;
+  }
+
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  .toolbar .spacer { flex: 1; }
+
+  /* ---------- 图表 ---------- */
+  .chart-wrap { background: #fff; border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; margin-bottom: 20px; }
+  .bars { display: flex; align-items: flex-end; gap: 5px; height: 150px; margin-top: 10px; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bar {
+    width: 100%; background: var(--accent); border-radius: 2px 2px 0 0;
+    min-height: 2px; transition: background .14s; position: relative;
+  }
+  .bar:hover { background: #a04d2f; }
+  .bar-lbl { font-family: var(--mono); font-size: 9px; color: var(--ink-faint); white-space: nowrap; }
+  .bar-val { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); }
+
+  .hbar-row { display: grid; grid-template-columns: 190px 1fr 76px; gap: 12px; align-items: center; margin-bottom: 9px; font-size: 13.5px; }
+  .hbar-track { background: var(--paper-raised); border-radius: 3px; height: 20px; overflow: hidden; }
+  .hbar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .hbar-val { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); text-align: right; }
+
+  .progress { background: var(--paper-raised); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 5px; }
+  .chart-wrap .progress { height: 8px; margin-top: 8px; display: block; }
+  .chart-wrap .progress > div { height: 8px; min-width: 2px; }
+  .chart-wrap .hbar-row:last-child { margin-bottom: 0; }
+  .progress > div { height: 100%; background: var(--ok); border-radius: 4px; }
+  .progress.warn > div { background: var(--warn); }
+  .progress.err > div { background: var(--err); }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 12px 16px; font-size: 13.5px; color: var(--ink-soft);
+    border-radius: 0 6px 6px 0; margin: 16px 0;
+  }
+  .note.warn { border-color: var(--warn); background: #f8f3e7; }
+
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(26,25,21,.32);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal-mask.open { display: flex; }
+  .modal {
+    background: var(--paper); border-radius: 12px; padding: 28px;
+    width: 100%; max-width: 560px; max-height: 86vh; overflow-y: auto;
+  }
+  .modal h3 { margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    .sidebar { width: 100%; flex: none; height: auto; position: static; padding: 18px 0; }
+    nav { flex-direction: row; overflow-x: auto; padding: 0 14px; }
+    .brand { padding: 0 18px 14px; }
+    .sidebar-foot { display: none; }
+    .main { padding: 26px 20px 60px; }
+    .grid2, .grid3 { grid-template-columns: 1fr; }
+    .hbar-row { grid-template-columns: 110px 1fr 68px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="kicker">管理后台</div>
+      <h1>qoder2api</h1>
+    </div>
+    <nav>
+      <a href="#overview" data-page="overview" class="active"><span class="ico">◈</span>概览</a>
+      <a href="#members" data-page="members"><span class="ico">◉</span>成员</a>
+      <a href="#accounts" data-page="accounts"><span class="ico">◇</span>账号</a>
+      <a href="#analytics" data-page="analytics"><span class="ico">▤</span>数据</a>
+      <a href="#settings" data-page="settings"><span class="ico">⚙</span>接入</a>
+    </nav>
+    <div class="sidebar-foot">
+      成员控制台<br>
+      <span class="mono">/console?key=…</span>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- 概览 -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <h2>概览</h2>
+        <p>账号积分余量、成员用量和近期调用情况。</p>
+      </div>
+      <div class="stat-row" id="ov-stats"></div>
+      <div class="chart-wrap">
+        <h3>近 14 天积分消耗</h3>
+        <div class="bars" id="ov-chart"></div>
+      </div>
+      <div class="grid2">
+        <div class="chart-wrap">
+          <h3>按模型</h3>
+          <div id="ov-models"></div>
+        </div>
+        <div class="chart-wrap">
+          <h3>按成员</h3>
+          <div id="ov-members"></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="chart-wrap">
+          <h3>账号积分余量</h3>
+          <div id="ov-accounts"></div>
+        </div>
+        <div class="chart-wrap">
+          <h3>成员额度使用</h3>
+          <div id="ov-limits"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 成员 -->
+    <section class="page" id="page-members">
+      <div class="page-head">
+        <h2>成员</h2>
+        <p>为每个成员设定积分上限、优先使用的账号和可用模型。成员用自己的 API Key 登录控制台查看用量。</p>
+      </div>
+      <div class="toolbar">
+        <button class="primary" onclick="openMemberModal()">新增成员</button>
+        <div class="spacer"></div>
+        <button class="ghost" onclick="loadMembers()">刷新</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>成员</th><th>今日 / 上限</th><th>本周 / 上限</th>
+          <th>优先账号</th><th>密钥</th><th>状态</th><th></th>
+        </tr></thead>
+        <tbody id="member-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 账号 -->
+    <section class="page" id="page-accounts">
+      <div class="page-head">
+        <h2>账号</h2>
+        <p>读取 Qoder 账号的积分余量，并查看每个账号被网关消耗了多少。</p>
+      </div>
+      <div class="toolbar">
+        <button class="primary" onclick="openAccountModal()">接入账号</button>
+        <button onclick="syncAll()">同步积分</button>
+        <div class="spacer"></div>
+        <button class="ghost" onclick="loadAccounts()">刷新</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>账号</th><th>积分余量</th><th>额度构成</th>
+          <th>网关已消耗</th><th>绑定成员</th><th>状态</th><th></th>
+        </tr></thead>
+        <tbody id="account-body"></tbody>
+      </table>
+    </section>
+
+    <!-- 数据 -->
+    <section class="page" id="page-analytics">
+      <div class="page-head">
+        <h2>数据</h2>
+        <p>积分消耗的分布情况，用于判断额度分配是否合理。</p>
+      </div>
+      <div class="stat-row" id="an-stats"></div>
+      <div class="chart-wrap">
+        <h3>近 14 天请求量</h3>
+        <div class="bars" id="an-chart"></div>
+      </div>
+      <div class="grid2">
+        <div class="chart-wrap">
+          <h3>模型消耗（近 7 天积分）</h3>
+          <div id="an-models"></div>
+        </div>
+        <div class="chart-wrap">
+          <h3>成员消耗（近 7 天积分）</h3>
+          <div id="an-members"></div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <h3>账号归属（积分被谁用掉）</h3>
+        <div id="an-accounts"></div>
+      </div>
+    </section>
+
+    <!-- 接入 -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <h2>接入</h2>
+        <p>把 API 地址和密钥发给成员，他们就可以在任意 OpenAI 兼容客户端里使用。</p>
+      </div>
+      <div class="card">
+        <h3>接口地址</h3>
+        <div class="keybox" id="base-url">—</div>
+        <div class="hint">在每个成员的密钥上配置 IP 白名单后，只有允许的来源可以调用。</div>
+      </div>
+      <div class="card">
+        <h3>可用模型</h3>
+        <div id="model-list" class="hint">正在读取…</div>
+      </div>
+      <div class="card">
+        <h3>最近调用</h3>
+        <table>
+          <thead><tr><th>时间</th><th>成员</th><th>模型</th><th>积分</th><th>Tokens</th><th>来源</th></tr></thead>
+          <tbody id="recent-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- 成员弹窗 -->
+<div class="modal-mask" id="member-modal">
+  <div class="modal">
+    <h3 id="member-modal-title">新增成员</h3>
+    <input type="hidden" id="m-id">
+    <div class="grid2">
+      <div class="field"><label>名字</label><input id="m-name" placeholder="张三"></div>
+      <div class="field"><label>邮箱（可选）</label><input id="m-email" placeholder="zhang@example.com"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>每日积分上限</label><input id="m-daily" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
+      <div class="field"><label>每周积分上限</label><input id="m-weekly" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
+    </div>
+    <div class="field">
+      <label>优先使用的账号</label>
+      <select id="m-account"><option value="">不指定，共用账号池</option></select>
+      <div class="hint">指定后优先用这个账号的积分；该账号不可用时自动回退到其他账号。</div>
+    </div>
+    <div class="field">
+      <label>可用模型（逗号分隔）</label>
+      <input id="m-models" placeholder="qfmodel,gfmodel,dfmodel">
+      <div class="hint">留空表示全部模型。默认只开放三个 Flash 档。</div>
+    </div>
+    <div class="field"><label>备注</label><input id="m-note" placeholder="可选"></div>
+    <div class="modal-actions">
+      <button onclick="closeModal('member-modal')">取消</button>
+      <button class="primary" onclick="saveMember()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 账号弹窗 -->
+<div class="modal-mask" id="account-modal">
+  <div class="modal">
+    <h3>接入 Qoder 账号</h3>
+    <div class="field">
+      <label>Personal Access Token</label>
+      <input id="a-pat" type="password" placeholder="pt-...">
+      <div class="hint">在 Qoder 的 Integrations 页面创建。令牌会被本地保存用于自动续期。</div>
+    </div>
+    <div class="field">
+      <label>区域</label>
+      <select id="a-region">
+        <option value="global">国际版 · qoder.com</option>
+        <option value="cn">国内版 · qoder.com.cn</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal('account-modal')">取消</button>
+      <button class="primary" onclick="addAccount()">校验并接入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 密钥弹窗 -->
+<div class="modal-mask" id="key-modal">
+  <div class="modal">
+    <h3>生成密钥</h3>
+    <input type="hidden" id="k-member">
+    <div class="field"><label>所属成员</label><div id="k-member-name" class="mono"></div></div>
+    <div class="field">
+      <label>允许的 IP / 网段</label>
+      <input id="k-ip" placeholder="例如 10.0.0.0/8, 203.0.113.7">
+      <div class="hint">留空不限制。建议填写，防止密钥外泄后被别人用。</div>
+    </div>
+    <div class="field"><label>备注</label><input id="k-note" placeholder="可选"></div>
+    <div id="k-result"></div>
+    <div class="modal-actions">
+      <button onclick="closeModal('key-modal')">关闭</button>
+      <button class="primary" onclick="createKey()">生成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token')
+           || localStorage.getItem('q2a_admin') || '';
+if (TOKEN) localStorage.setItem('q2a_admin', TOKEN);
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const num = (n, d = 2) => Number(n || 0).toFixed(d);
+const int = n => (n || 0).toLocaleString('en-US');
+
+let MEMBERS = [], ACCOUNTS = [], MODELS = {};
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'x-admin-token': TOKEN, 'Content-Type': 'application/json',
+               ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { data = { error: { message: text } }; }
+  if (!res.ok) throw new Error((data.error && data.error.message) || '请求失败');
+  return data;
+}
+
+/* ---------------- 导航 ---------------- */
+function show(page) {
+  document.querySelectorAll('nav a').forEach(a =>
+    a.classList.toggle('active', a.dataset.page === page));
+  document.querySelectorAll('.page').forEach(p =>
+    p.classList.toggle('active', p.id === 'page-' + page));
+  if (page === 'analytics') loadAnalytics();
+  if (page === 'settings') loadSettings();
+}
+document.querySelectorAll('nav a').forEach(a => {
+  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); });
+});
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-mask').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+
+/* ---------------- 图表 ---------------- */
+function renderBars(el, data, valueKey, fmtVal) {
+  const max = Math.max(...data.map(d => d[valueKey]), 0.0001);
+  el.innerHTML = data.map(d => {
+    const h = Math.max(2, (d[valueKey] / max) * 130);
+    const label = fmtVal ? fmtVal(d[valueKey]) : d[valueKey];
+    return `<div class="bar-col" title="${esc(d.date)}：${esc(label)}">
+      <div class="bar-val">${d[valueKey] > 0 ? esc(label) : ''}</div>
+      <div class="bar" style="height:${h}px"></div>
+      <div class="bar-lbl">${esc(d.date)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderHBars(el, rows, nameKey, valueKey, empty) {
+  if (!rows.length) { el.innerHTML = `<div class="empty">${empty || '暂无数据'}</div>`; return; }
+  const max = Math.max(...rows.map(r => r[valueKey]), 0.0001);
+  el.innerHTML = rows.map(r => `
+    <div class="hbar-row">
+      <div>${esc(r[nameKey])}</div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${(r[valueKey] / max) * 100}%"></div></div>
+      <div class="hbar-val">${num(r[valueKey], 3)}</div>
+    </div>`).join('');
+}
+
+/* ---------------- 概览 ---------------- */
+async function loadOverview() {
+  try {
+    const s = await api('/api/status');
+    const pct = s.credits_total > 0 ? (s.credits_remaining / s.credits_total) * 100 : 0;
+    document.getElementById('ov-stats').innerHTML = `
+      <div class="stat"><div class="num">${num(s.credits_remaining, 1)}<small>积分</small></div>
+        <div class="lbl">账号积分余量</div>
+        <div class="progress" style="width:150px"><div style="width:${pct}%"></div></div></div>
+      <div class="stat"><div class="num">${s.available}<small>/${s.accounts}</small></div><div class="lbl">可用账号</div></div>
+      <div class="stat"><div class="num">${s.members}</div><div class="lbl">成员</div></div>
+      <div class="stat"><div class="num">${s.keys}</div><div class="lbl">密钥</div></div>`;
+  } catch (e) {
+    document.getElementById('ov-stats').innerHTML =
+      `<div class="empty">${esc(e.message)}</div>`;
+  }
+  try {
+    const a = await api('/api/analytics');
+    renderBars(document.getElementById('ov-chart'), a.daily, 'credits', v => v.toFixed(2));
+    renderHBars(document.getElementById('ov-models'), a.by_model.slice(0, 6), 'model', 'credits', '还没有调用');
+    renderHBars(document.getElementById('ov-members'), a.by_member.slice(0, 6), 'name', 'credits', '还没有调用');
+  } catch { /* 忽略图表错误 */ }
+  renderAccountCredits();
+}
+
+function renderAccountCredits() {
+  const el = document.getElementById('ov-accounts');
+  if (!ACCOUNTS.length) { el.innerHTML = '<div class="empty">还没有接入账号</div>'; return; }
+  el.innerHTML = ACCOUNTS.map(a => {
+    const pct = a.credits_total > 0 ? Math.min(100, (a.credits_remaining / a.credits_total) * 100) : 0;
+    const cls = pct <= 10 ? 'progress err' : pct <= 30 ? 'progress warn' : 'progress';
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:13.5px">
+        <span>${esc(a.name || a.email)}</span>
+        <span class="mono">${num(a.credits_remaining, 1)} / ${num(a.credits_total, 0)}</span>
+      </div>
+      <div class="${cls}"><div style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderMemberLimits() {
+  const el = document.getElementById('ov-limits');
+  if (!MEMBERS.length) { el.innerHTML = '<div class="empty">还没有成员</div>'; return; }
+  el.innerHTML = MEMBERS.slice(0, 6).map(m => {
+    if (!m.limit_daily) {
+      return `<div style="display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:12px">
+        <span>${esc(m.name)}</span><span class="mono">今日 ${num(m.used_today)}（不限）</span></div>`;
+    }
+    const pct = Math.min(100, (m.used_today / m.limit_daily) * 100);
+    const cls = pct >= 95 ? 'progress err' : pct >= 70 ? 'progress warn' : 'progress';
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:13.5px">
+        <span>${esc(m.name)}</span>
+        <span class="mono">${num(m.used_today)} / ${num(m.limit_daily)}</span>
+      </div>
+      <div class="${cls}"><div style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- 成员 ---------------- */
+async function loadMembers() {
+  const body = document.getElementById('member-body');
+  try {
+    const [m, a] = await Promise.all([api('/api/members'), api('/api/accounts')]);
+    MEMBERS = m.members; ACCOUNTS = a.accounts;
+    renderMemberLimits();
+    if (!MEMBERS.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">还没有成员，先新增一个</td></tr>';
+      return;
+    }
+    body.innerHTML = MEMBERS.map(m => {
+      const dPct = m.limit_daily > 0 ? Math.min(100, (m.used_today / m.limit_daily) * 100) : 0;
+      const wPct = m.limit_weekly > 0 ? Math.min(100, (m.used_week / m.limit_weekly) * 100) : 0;
+      const cls = p => p >= 95 ? 'progress err' : p >= 70 ? 'progress warn' : 'progress';
+      return `<tr>
+        <td><strong>${esc(m.name)}</strong>
+          ${m.email ? `<div class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(m.email)}</div>` : ''}
+          ${m.note ? `<div class="hint">${esc(m.note)}</div>` : ''}</td>
+        <td class="mono">${num(m.used_today)} ${m.limit_daily > 0 ? '/ ' + num(m.limit_daily) : '<span style="color:var(--ink-faint)">不限</span>'}
+          ${m.limit_daily > 0 ? `<div class="${cls(dPct)}"><div style="width:${dPct}%"></div></div>` : ''}</td>
+        <td class="mono">${num(m.used_week)} ${m.limit_weekly > 0 ? '/ ' + num(m.limit_weekly) : '<span style="color:var(--ink-faint)">不限</span>'}
+          ${m.limit_weekly > 0 ? `<div class="${cls(wPct)}"><div style="width:${wPct}%"></div></div>` : ''}</td>
+        <td>${m.preferred_account ? esc(m.preferred_account) : '<span style="color:var(--ink-faint)">共用池</span>'}</td>
+        <td>${m.keys.length ? m.keys.map(k =>
+              `<div class="mono" style="font-size:11.5px">${esc(k.prefix)}… ${k.enabled ? '' : '<span class="pill off">停用</span>'}</div>`).join('')
+            : '<span style="color:var(--ink-faint)">无</span>'}
+          <button class="small ghost" onclick="openKeyModal(${m.id},'${esc(m.name)}')">+ 密钥</button></td>
+        <td>${m.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill off">停用</span>'}</td>
+        <td><div class="row-actions">
+          <button class="small" onclick="editMember(${m.id})">编辑</button>
+          <button class="small" onclick="toggleMember(${m.id},${!m.enabled})">${m.enabled ? '停用' : '启用'}</button>
+          <button class="small ghost" onclick="delMember(${m.id})">删除</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function openMemberModal() {
+  document.getElementById('member-modal-title').textContent = '新增成员';
+  document.getElementById('m-id').value = '';
+  ['m-name','m-email','m-daily','m-weekly','m-note'].forEach(id =>
+    document.getElementById(id).value = '');
+  document.getElementById('m-models').value = 'qfmodel,gfmodel,dfmodel';
+  const sel = document.getElementById('m-account');
+  sel.innerHTML = '<option value="">不指定，共用账号池</option>' +
+    ACCOUNTS.map(a => `<option value="${a.id}">${esc(a.name || a.email)}（余 ${num(a.credits_remaining, 1)}）</option>`).join('');
+  sel.value = '';
+  openModal('member-modal');
+}
+
+function editMember(id) {
+  const m = MEMBERS.find(x => x.id === id);
+  if (!m) return;
+  document.getElementById('member-modal-title').textContent = '编辑成员';
+  document.getElementById('m-id').value = m.id;
+  document.getElementById('m-name').value = m.name;
+  document.getElementById('m-email').value = m.email || '';
+  document.getElementById('m-daily').value = m.limit_daily || '';
+  document.getElementById('m-weekly').value = m.limit_weekly || '';
+  document.getElementById('m-models').value = m.model_allowlist || '';
+  document.getElementById('m-note').value = m.note || '';
+  const sel = document.getElementById('m-account');
+  sel.innerHTML = '<option value="">不指定，共用账号池</option>' +
+    ACCOUNTS.map(a => `<option value="${a.id}">${esc(a.name || a.email)}（余 ${num(a.credits_remaining, 1)}）</option>`).join('');
+  sel.value = m.preferred_account_id || '';
+  openModal('member-modal');
+}
+
+async function saveMember() {
+  const id = document.getElementById('m-id').value;
+  const payload = {
+    name: document.getElementById('m-name').value.trim(),
+    email: document.getElementById('m-email').value.trim(),
+    limit_daily: parseFloat(document.getElementById('m-daily').value || '0'),
+    limit_weekly: parseFloat(document.getElementById('m-weekly').value || '0'),
+    preferred_account_id: parseInt(document.getElementById('m-account').value || '0') || null,
+    model_allowlist: document.getElementById('m-models').value.trim(),
+    note: document.getElementById('m-note').value.trim(),
+  };
+  if (!payload.name) { alert('请填写名字'); return; }
+  try {
+    if (id) await api('/api/members/' + id, { method: 'PATCH', body: JSON.stringify(payload) });
+    else await api('/api/members', { method: 'POST', body: JSON.stringify(payload) });
+    closeModal('member-modal');
+    loadMembers(); loadOverview();
+  } catch (e) { alert(e.message); }
+}
+
+async function toggleMember(id, enabled) {
+  try { await api('/api/members/' + id, { method: 'PATCH', body: JSON.stringify({ enabled }) }); }
+  catch (e) { alert(e.message); }
+  loadMembers();
+}
+
+async function delMember(id) {
+  if (!confirm('删除这个成员？他名下的密钥会一并失效。')) return;
+  try { await api('/api/members/' + id, { method: 'DELETE' }); }
+  catch (e) { alert(e.message); }
+  loadMembers(); loadOverview();
+}
+
+/* ---------------- 密钥 ---------------- */
+function openKeyModal(memberId, name) {
+  document.getElementById('k-member').value = memberId;
+  document.getElementById('k-member-name').textContent = name;
+  document.getElementById('k-ip').value = '';
+  document.getElementById('k-note').value = '';
+  document.getElementById('k-result').innerHTML = '';
+  openModal('key-modal');
+}
+
+async function createKey() {
+  const memberId = document.getElementById('k-member').value;
+  try {
+    const d = await api('/api/keys', {
+      method: 'POST',
+      body: JSON.stringify({
+        member_id: parseInt(memberId),
+        ip_allowlist: document.getElementById('k-ip').value.trim(),
+        note: document.getElementById('k-note').value.trim(),
+      }),
+    });
+    document.getElementById('k-result').innerHTML =
+      `<div class="keybox">${esc(d.key)}</div>
+       <div class="hint" style="color:var(--warn)">这条密钥只显示一次，现在复制保存。成员用它登录控制台：<br>
+       <span class="mono">/console?key=${esc(d.key.slice(0, 8))}…</span></div>`;
+    loadMembers();
+  } catch (e) { alert(e.message); }
+}
+
+/* ---------------- 账号 ---------------- */
+async function loadAccounts() {
+  const body = document.getElementById('account-body');
+  try {
+    const d = await api('/api/accounts');
+    ACCOUNTS = d.accounts;
+    renderAccountCredits();
+    if (!ACCOUNTS.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">还没有接入账号</td></tr>';
+      return;
+    }
+    body.innerHTML = ACCOUNTS.map(a => {
+      const pct = a.credits_total > 0 ? (a.credits_remaining / a.credits_total) * 100 : 0;
+      const state = !a.enabled ? '<span class="pill off">停用</span>'
+        : a.cooldown > 0 ? `<span class="pill warn">冷却 ${a.cooldown}s</span>`
+        : '<span class="pill ok">可用</span>';
+      return `<tr>
+        <td><strong>${esc(a.name || a.email)}</strong>
+          <div class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(a.email)}</div>
+          <div class="hint">${a.region === 'cn' ? '国内版' : '国际版'}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div></td>
+        <td class="mono">${num(a.credits_remaining, 1)} <span style="color:var(--ink-faint)">/ ${num(a.credits_total, 0)}</span>
+          <div class="progress"><div style="width:${pct}%"></div></div>
+          ${a.synced_ago !== null ? `<div class="hint">${a.synced_ago} 秒前同步</div>` : '<div class="hint">未同步</div>'}</td>
+        <td class="mono" style="font-size:12px">已用 ${num(a.credits_used, 1)}${a.credits_addon > 0 ? `<br>附加 ${num(a.credits_addon, 1)}` : ''}</td>
+        <td class="mono">${num(a.gateway_consumed, 2)}</td>
+        <td>${a.bound_members.length ? a.bound_members.map(esc).join('、') : '<span style="color:var(--ink-faint)">无</span>'}</td>
+        <td>${state}</td>
+        <td><div class="row-actions">
+          <button class="small" onclick="accAction(${a.id},'${a.enabled ? 'disable' : 'enable'}')">${a.enabled ? '停用' : '启用'}</button>
+          <button class="small ghost" onclick="delAccount(${a.id})">移除</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function openAccountModal() {
+  document.getElementById('a-pat').value = '';
+  openModal('account-modal');
+}
+
+async function addAccount() {
+  const pat = document.getElementById('a-pat').value.trim();
+  const region = document.getElementById('a-region').value;
+  if (!pat) { alert('请填写 PAT'); return; }
+  try {
+    const d = await api('/api/accounts', { method: 'POST', body: JSON.stringify({ pat, region }) });
+    closeModal('account-modal');
+    alert('已接入 ' + (d.account.name || d.account.email));
+    loadAccounts(); loadOverview();
+  } catch (e) { alert(e.message); }
+}
+
+async function syncAll() {
+  try {
+    await api('/api/accounts/sync', { method: 'POST', body: '{}' });
+    loadAccounts(); loadOverview();
+  } catch (e) { alert(e.message); }
+}
+
+async function accAction(id, action) {
+  try { await api('/api/accounts/action', { method: 'POST', body: JSON.stringify({ id, action }) }); }
+  catch (e) { alert(e.message); }
+  loadAccounts();
+}
+
+async function delAccount(id) {
+  if (!confirm('移除这个账号？')) return;
+  try { await api('/api/accounts/' + id, { method: 'DELETE' }); }
+  catch (e) { alert(e.message); }
+  loadAccounts(); loadOverview();
+}
+
+/* ---------------- 数据 ---------------- */
+async function loadAnalytics() {
+  try {
+    const a = await api('/api/analytics');
+    document.getElementById('an-stats').innerHTML = `
+      <div class="stat"><div class="num">${int(a.totals.requests)}</div><div class="lbl">近 30 天请求</div></div>
+      <div class="stat"><div class="num">${num(a.totals.credits_7d, 1)}<small>积分</small></div><div class="lbl">近 7 天消耗</div></div>
+      <div class="stat"><div class="num">${a.by_model.length}</div><div class="lbl">使用中的模型</div></div>
+      <div class="stat"><div class="num">${a.by_member.length}</div><div class="lbl">活跃成员</div></div>`;
+    renderBars(document.getElementById('an-chart'), a.daily, 'requests', v => int(v));
+    renderHBars(document.getElementById('an-models'), a.by_model, 'model', 'credits', '还没有调用');
+    renderHBars(document.getElementById('an-members'), a.by_member, 'name', 'credits', '还没有调用');
+    renderHBars(document.getElementById('an-accounts'), a.by_account, 'name', 'credits', '还没有消耗');
+  } catch (e) {
+    document.getElementById('an-stats').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------------- 接入页 ---------------- */
+async function loadSettings() {
+  document.getElementById('base-url').textContent =
+    location.origin + '/v1/chat/completions';
+  try {
+    const s = await api('/api/status');
+    const names = { qfmodel: 'Qwen3.8-Flash', gfmodel: 'GLM-5.3-Flash', dfmodel: 'DeepSeek-Flash' };
+    document.getElementById('model-list').innerHTML = s.models.map(m =>
+      `<span class="pill" style="margin:0 6px 6px 0">${esc(m)}${names[m] ? ' · ' + names[m] : ''}</span>`).join('')
+      || '尚未读取到模型';
+  } catch (e) {
+    document.getElementById('model-list').textContent = e.message;
+  }
+  try {
+    const u = await api('/api/usage');
+    const body = document.getElementById('recent-body');
+    if (!u.recent.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty">还没有调用记录</td></tr>';
+      return;
+    }
+    const nameOf = id => (MEMBERS.find(m => m.id === id) || {}).name || '—';
+    body.innerHTML = u.recent.slice(0, 30).map(r => `<tr>
+      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+      <td>${esc(nameOf(r.member_id))}</td>
+      <td class="mono">${esc(r.model)}</td>
+      <td class="mono">${num(r.credits, 4)}</td>
+      <td class="mono">${int(r.total_tokens)}</td>
+      <td class="mono" style="font-size:11.5px">${esc(r.ip)}</td>
+    </tr>`).join('');
+  } catch { /* 忽略 */ }
+}
+
+/* ---------------- 启动 ---------------- */
+(async function init() {
+  if (!TOKEN) {
+    document.getElementById('ov-stats').innerHTML =
+      '<div class="note warn">缺少管理令牌。请在地址后附加 <span class="mono">?token=…</span>。</div>';
+    return;
+  }
+  loadOverview(); loadMembers(); loadAccounts();
+})();
+</script>
+</body>
+</html>

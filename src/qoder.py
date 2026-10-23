@@ -68,6 +68,19 @@ def _request(url: str, *, method="GET", body: bytes | None = None,
         raise UpstreamError(0, str(e), f"network error: {e.reason}") from e
 
 
+def _expires_seconds(data: dict, default: int = 86400) -> int:
+    """Qoder 返回的 expires_in 单位是毫秒，归一化成秒。"""
+    raw = data.get("expires_in")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    # 大于一天的毫秒值除以 1000；已经是秒的（<=86400）原样返回
+    return value // 1000 if value > 86400 else value
+
+
 def exchange_pat(pat: str, region: str) -> dict:
     """用 PAT 换 job token。不需要 COSY 签名。"""
     url = f"{REGIONS[region]['openapi']}/api/v1/jobToken/exchange"
@@ -89,7 +102,7 @@ def exchange_pat(pat: str, region: str) -> dict:
         "access_token": data["token"],
         "refresh_token": data.get("refresh_token", ""),
         "expires_at": data.get("expires_at") or "",
-        "expires_in": data.get("expires_in", 86400),
+        "expires_in": _expires_seconds(data),
     }
 
 
@@ -132,7 +145,7 @@ def refresh_token(refresh_token: str, region: str) -> dict:
     return {
         "access_token": data.get("token", ""),
         "refresh_token": data.get("refresh_token", refresh_token),
-        "expires_in": data.get("expires_in", 86400),
+        "expires_in": _expires_seconds(data),
     }
 
 
@@ -288,3 +301,32 @@ def chat_stream(account: dict, body: bytes, model: str):
                 yield line
 
     return gen()
+
+
+def fetch_quota(account: dict) -> dict:
+    """查询账号积分余额。返回总额度、已用、剩余和附加额度。"""
+    region = account["region"]
+    url = f"{REGIONS[region]['openapi']}/api/v2/quota/usage"
+    status, raw = _request(url, headers={
+        "Authorization": f"Bearer {account['access_token']}",
+        "Accept": "application/json",
+        "User-Agent": "undici",
+        "Cosy-Version": COSY_VERSION,
+        "Cosy-ClientType": COSY_CLIENT_TYPE,
+    })
+    text = raw.decode("utf-8", "replace")
+    if status != 200:
+        raise UpstreamError(status, text, "查询积分失败")
+    data = json.loads(text)
+
+    quota = data.get("userQuota") or {}
+    addon = data.get("addOnQuota") or {}
+    return {
+        "total": float(quota.get("total") or 0),
+        "used": float(quota.get("used") or 0),
+        "remaining": float(quota.get("remaining") or 0),
+        "addon_total": float(addon.get("total") or 0),
+        "addon_remaining": float(addon.get("remaining") or 0),
+        "plan": data.get("userType") or "",
+        "exceeded": bool(data.get("isQuotaExceeded")),
+    }
