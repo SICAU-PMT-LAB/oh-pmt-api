@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -23,7 +24,24 @@ DB_PATH = os.path.join(DATA_DIR, "qoder2api.db")
 
 STORE: Store | None = None
 TRUST_FORWARDED = os.environ.get("Q2A_TRUST_FORWARDED", "0") == "1"
-ADMIN_TOKEN = os.environ.get("Q2A_ADMIN_TOKEN", "")
+SESSION_COOKIE = "q2a_session"
+# 会话签名密钥：优先用环境变量，否则从数据库文件路径派生（重启后会话仍有效）
+_SESSION_KEY = os.environ.get("Q2A_SESSION_KEY", "").encode() or b"qoder2api-local-session-key"
+
+
+def _sign(value: str) -> str:
+    sig = hmac.new(_SESSION_KEY, value.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{value}.{sig}"
+
+
+def _unsign(signed: str) -> str | None:
+    if not signed or "." not in signed:
+        return None
+    value, _, sig = signed.rpartition(".")
+    want = hmac.new(_SESSION_KEY, value.encode(), hashlib.sha256).hexdigest()[:32]
+    if not secrets.compare_digest(sig, want):
+        return None
+    return value
 
 _MODEL_CACHE: dict[str, tuple[float, list]] = {}
 _MODEL_LOCK = threading.Lock()
@@ -183,33 +201,47 @@ class Handler(BaseHTTPRequestHandler):
                 return None
         return record, member
 
-    def _auth_admin(self) -> bool:
-        """管理员鉴权。
-
-        只认请求头或已登录的 Cookie 会话，不接受 URL 参数：
-        令牌放在 ?token= 里会进入浏览器历史、nginx access log 和 Referer，
-        等于把管理凭证发到公网上。
-        """
-        if not ADMIN_TOKEN:
-            if self.client_address[0] in ("127.0.0.1", "::1"):
-                return True
-            self._error(403, "admin_locked", "未配置管理令牌，仅限本机访问")
-            return False
-
-        token = self.headers.get("x-admin-token", "")
-        if token and secrets.compare_digest(token, ADMIN_TOKEN):
-            return True
-
+    def _session(self) -> dict | None:
+        """读取登录会话：Cookie 里存的是签名后的 member_id，不存密码。"""
         cookies = SimpleCookie(self.headers.get("Cookie", ""))
-        got = cookies.get("q2a_admin")
-        if got and secrets.compare_digest(got.value, self._admin_cookie_value()):
-            return True
+        got = cookies.get(SESSION_COOKIE)
+        if not got:
+            return None
+        raw = _unsign(got.value)
+        if not raw or not raw.startswith("m:"):
+            return None
+        try:
+            member = get_store().get_member(int(raw[2:]))
+        except (ValueError, TypeError):
+            return None
+        if not member or not member["enabled"]:
+            return None
+        return member
 
-        self._error(401, "admin_denied", "请先登录")
+    def _auth_admin(self) -> bool:
+        """管理员鉴权：必须是已登录且 is_admin 的账号。"""
+        member = self._session()
+        if member and member.get("is_admin"):
+            return True
+        # 兼容本机运维：无任何管理员账号时本机直连放行
+        if not get_store().get_admin() and self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
+        self._error(401, "admin_denied", "请先用管理员账号登录")
         return False
 
     def _auth_member(self) -> dict | None:
-        """成员控制台鉴权：用成员自己的 API Key。"""
+        """成员控制台鉴权：已登录的会话，或成员自己的 API Key。"""
+        member = self._session()
+        if member:
+            return {"member": member, "key": None, "api_key": self._key_of(member["id"])}
+        return self._auth_by_key()
+
+    def _key_of(self, member_id: int) -> dict | None:
+        keys = get_store().list_keys(member_id)
+        return keys[0] if keys else None
+
+    def _auth_by_key(self) -> dict | None:
+        """用 API Key 鉴权（SDK 调用和控制台链接都走这里）。"""
         header = self.headers.get("Authorization", "")
         raw = header[7:].strip() if header.lower().startswith("bearer ") else ""
         if not raw:
@@ -273,13 +305,26 @@ class Handler(BaseHTTPRequestHandler):
                     "recent": get_store().usage_for_member(ctx["member"]["id"], 100)
                 })
 
-            if path in ("/", "/admin"):
+            # 根路径：已登录的管理员进后台，已登录的成员进成员页，否则去登录
+            if path == "/":
+                member = self._session()
+                if member and member.get("is_admin"):
+                    return self._redirect("/admin")
+                if member:
+                    return self._redirect("/me")
+                if not get_store().get_admin() and self.client_address[0] in ("127.0.0.1", "::1"):
+                    return self._serve_html("admin.html")
+                return self._redirect("/login")
+            if path == "/admin":
                 if not self._auth_admin_page():
                     return
                 return self._serve_html("admin.html")
             if path in ("/console", "/me"):
                 return self._serve_html("console.html")
             if path == "/login":
+                member = self._session()
+                if member:
+                    return self._redirect("/admin" if member.get("is_admin") else "/me")
                 return self._serve_html("login.html")
             return self._error(404, "not_found", "接口不存在")
         except Exception as e:  # noqa: BLE001
@@ -288,6 +333,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         try:
+            if path == "/api/login":
+                return self._do_login()
+            if path == "/api/logout":
+                return self._do_logout()
             if path == "/v1/chat/completions":
                 return self._chat_completions()
 
@@ -331,7 +380,18 @@ class Handler(BaseHTTPRequestHandler):
                           ("name", "email", "enabled", "limit_daily", "limit_weekly",
                            "preferred_account_id", "model_allowlist", "note")
                           if k in body}
-                get_store().update_member(mid, **fields)
+                store = get_store()
+                username = (body.get("username") or "").strip()
+                if username:
+                    other = store.get_member_by_username(username)
+                    if other and other["id"] != mid:
+                        return self._error(409, "username_taken", "该账号已存在")
+                    fields["username"] = username
+                password = body.get("password") or ""
+                if fields:
+                    store.update_member(mid, **fields)
+                if password:
+                    store.set_password(mid, password)
                 return self._send_json(200, {"ok": True})
             if path.startswith("/api/keys/"):
                 kid = int(path.rsplit("/", 1)[-1])
@@ -377,6 +437,48 @@ class Handler(BaseHTTPRequestHandler):
             data.append({"id": mid, "object": "model",
                          "owned_by": f"qoder-{m.get('region', 'global')}"})
         return self._send_json(200, {"object": "list", "data": data})
+
+    # ---------------- 登录 ----------------
+
+    def _do_login(self):
+        body = self._read_json()
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        store = get_store()
+        member = store.get_member_by_username(username)
+
+        # 用户名不存在时也跑一次哈希，避免用响应时间探出账号是否存在
+        ok = Store.verify_password(
+            password, member["password_hash"] if member else Store.hash_password("x"))
+        if not member or not ok:
+            return self._error(401, "login_failed", "账号或密码错误")
+        if not member["enabled"]:
+            return self._error(403, "member_disabled", "该账号已停用")
+
+        cookie = f"{SESSION_COOKIE}={_sign('m:' + str(member['id']))}"
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header(
+            "Set-Cookie",
+            f"{cookie}; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax{secure}")
+        payload = json.dumps({
+            "ok": True, "is_admin": bool(member.get("is_admin")),
+            "name": member["name"], "redirect": "/admin" if member.get("is_admin") else "/me",
+        }).encode()
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _do_logout(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Set-Cookie",
+                         f"{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+        payload = b'{"ok": true}'
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _chat_completions(self):
         auth = self._auth_key()
@@ -536,6 +638,10 @@ class Handler(BaseHTTPRequestHandler):
         name = (body.get("name") or "").strip()
         if not name:
             return self._error(400, "bad_request", "成员名字不能为空")
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        if username and get_store().get_member_by_username(username):
+            return self._error(409, "username_taken", "该账号已存在")
         mid = get_store().create_member(
             name=name,
             email=(body.get("email") or "").strip(),
@@ -546,6 +652,8 @@ class Handler(BaseHTTPRequestHandler):
                              if body.get("model_allowlist") is not None
                              else "qfmodel,gfmodel,dfmodel"),
             note=(body.get("note") or "").strip(),
+            username=username or None,
+            password=password or None,
         )
         return self._send_json(200, {"ok": True, "id": mid})
 
@@ -605,6 +713,8 @@ class Handler(BaseHTTPRequestHandler):
             pref = accounts.get(m["preferred_account_id"] or 0)
             out.append({
                 "id": m["id"], "name": m["name"], "email": m["email"],
+                "username": m.get("username") or "",
+                "is_admin": bool(m.get("is_admin")),
                 "enabled": bool(m["enabled"]),
                 "limit_daily": st["limit_daily"],
                 "limit_weekly": st["limit_weekly"],
@@ -682,17 +792,20 @@ class Handler(BaseHTTPRequestHandler):
     def _member_dashboard(self, ctx: dict) -> dict:
         store = get_store()
         member = ctx["member"]
-        key = ctx["key"]
+        key = ctx.get("key")
         accounts = {a["id"]: a for a in store.list_accounts()}
-        allowed = guard.allowed_models(key, member)
+        allowed = guard.allowed_models(key or {}, member)
         models = all_models()
         return {
             "member": {
                 "id": member["id"], "name": member["name"],
-                "email": member["email"],
+                "email": member["email"], "username": member.get("username") or "",
                 "model_allowlist": sorted(allowed),
             },
-            "key": {"prefix": key["key_prefix"], "ip_allowlist": key["ip_allowlist"]},
+            "key": {
+                "prefix": (key or {}).get("key_prefix", ""),
+                "ip_allowlist": (key or {}).get("ip_allowlist", ""),
+            },
             "quota": guard.quota_status(store, member),
             "preferred_account": (
                 accounts.get(member["preferred_account_id"]) or {}
@@ -706,43 +819,23 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- 静态页面 ----------------
 
-    def _admin_cookie_value(self) -> str:
-        """管理员页面会话令牌：由管理令牌派生，不直接下发管理令牌本身。"""
-        return hashlib.sha256((ADMIN_TOKEN or "").encode()).hexdigest()[:40]
-
     def _auth_admin_page(self) -> bool:
-        """管理员页面的访问控制。
-
-        浏览器直接访问 URL 时发不出自定义请求头，所以用 HttpOnly Cookie。
-        首次进入优先看请求头里的令牌，拿到后下发 Cookie 并跳转去掉 URL 中的令牌。
-        """
-        if not ADMIN_TOKEN:
-            if self.client_address[0] in ("127.0.0.1", "::1"):
-                return True
-            self._error(403, "admin_locked", "未配置管理令牌，仅限本机访问")
-            return False
-
-        cookies = SimpleCookie(self.headers.get("Cookie", ""))
-        got = cookies.get("q2a_admin")
-        if got and secrets.compare_digest(got.value, self._admin_cookie_value()):
+        """管理员页面：没有管理员会话就跳到统一登录页。"""
+        member = self._session()
+        if member and member.get("is_admin"):
             return True
+        if not get_store().get_admin() and self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
+        return self._redirect("/login")
 
-        token = self.headers.get("x-admin-token", "")
-        if token and secrets.compare_digest(token, ADMIN_TOKEN):
-            cookie = f"q2a_admin={self._admin_cookie_value()}"
-            self.send_response(302)
-            self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + "/admin")
+    def _redirect(self, location: str, cookie: str | None = None) -> bool:
+        self.send_response(302)
+        self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + location)
+        if cookie:
+            secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             self.send_header(
                 "Set-Cookie",
-                f"{cookie}; Path=/; Max-Age=43200; HttpOnly; SameSite=Strict"
-                + ("; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""),
-            )
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return False
-
-        self.send_response(302)
-        self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + "/login")
+                f"{cookie}; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax{secure}")
         self.send_header("Content-Length", "0")
         self.end_headers()
         return False

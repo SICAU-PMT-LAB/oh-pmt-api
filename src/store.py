@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS members (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,
     email           TEXT DEFAULT '',
+    -- 登录账号：用户名 + 密码哈希（普通成员和控制台都用它登录）
+    username        TEXT UNIQUE,
+    password_hash   TEXT DEFAULT '',
+    is_admin        INTEGER DEFAULT 0,
     enabled         INTEGER DEFAULT 1,
     -- 限额（积分），0 表示不限
     limit_daily     REAL DEFAULT 0,
@@ -161,6 +165,16 @@ class Store:
             if name not in key_cols:
                 c.execute(f"ALTER TABLE api_keys ADD COLUMN {name} {decl}")
 
+        # members 新增账号密码登录
+        mem_cols = columns("members")
+        for name, decl in (
+            ("username", "TEXT"),
+            ("password_hash", "TEXT DEFAULT ''"),
+            ("is_admin", "INTEGER DEFAULT 0"),
+        ):
+            if name not in mem_cols:
+                c.execute(f"ALTER TABLE members ADD COLUMN {name} {decl}")
+
         # usage 新增记账列
         use_cols = columns("usage")
         for name, decl in (
@@ -268,16 +282,59 @@ class Store:
 
     def create_member(self, *, name, email="", limit_daily=0.0, limit_weekly=0.0,
                       preferred_account_id=None, model_allowlist=DEFAULT_MODELS,
-                      note="") -> int:
+                      note="", username=None, password=None, is_admin=0) -> int:
+        pwd_hash = self.hash_password(password) if password else ""
         with self._conn() as c:
             cur = c.execute(
                 """INSERT INTO members (name, email, limit_daily, limit_weekly,
-                     preferred_account_id, model_allowlist, note, created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                     preferred_account_id, model_allowlist, note, username,
+                     password_hash, is_admin, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (name, email, limit_daily, limit_weekly, preferred_account_id,
-                 model_allowlist, note, time.time()),
+                 model_allowlist, note, username, pwd_hash, is_admin, time.time()),
             )
             return int(cur.lastrowid)
+
+    # ---------------- 账号密码 ----------------
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """PBKDF2-HMAC-SHA256，带随机 salt，格式 pbkdf2$迭代$salt$hash。"""
+        salt = secrets.token_bytes(16)
+        rounds = 200_000
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, rounds)
+        return f"pbkdf2${rounds}${salt.hex()}${dk.hex()}"
+
+    @staticmethod
+    def verify_password(password: str, stored: str) -> bool:
+        if not stored or not stored.startswith("pbkdf2$"):
+            return False
+        try:
+            _, rounds, salt_hex, hash_hex = stored.split("$")
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode(),
+                                     bytes.fromhex(salt_hex), int(rounds))
+        except (ValueError, TypeError):
+            return False
+        return secrets.compare_digest(dk.hex(), hash_hex)
+
+    def set_password(self, member_id: int, password: str):
+        with self._conn() as c:
+            c.execute("UPDATE members SET password_hash=? WHERE id=?",
+                      (self.hash_password(password), member_id))
+
+    def get_member_by_username(self, username: str) -> dict | None:
+        if not username:
+            return None
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM members WHERE username=?",
+                            (username,)).fetchone()
+            return dict(row) if row else None
+
+    def get_admin(self) -> dict | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM members WHERE is_admin=1 ORDER BY id LIMIT 1").fetchone()
+            return dict(row) if row else None
 
     def list_members(self) -> list[dict]:
         with self._conn() as c:
@@ -290,7 +347,8 @@ class Store:
 
     def update_member(self, member_id: int, **fields):
         allowed = {"name", "email", "enabled", "limit_daily", "limit_weekly",
-                   "preferred_account_id", "model_allowlist", "note"}
+                   "preferred_account_id", "model_allowlist", "note",
+                   "username", "is_admin"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return
@@ -314,12 +372,16 @@ class Store:
 
     @classmethod
     def generate_key(cls) -> str:
-        """生成密钥：前缀 sicau-PMT-，中间必须含连续的 487。
+        """生成密钥：sicau-PMT- 开头，487 随机藏在中间乱码里。
 
-        487 放在随机段的前部固定位置，后面接足够长的随机字符保证熵。
+        487 不紧跟前缀，而是插在随机段的随机位置，看起来就是普通随机字符。
         """
-        body = secrets.token_urlsafe(32).replace("-", "").replace("_", "")[:30]
-        return f"{cls.KEY_PREFIX}{cls.KEY_MARKER}{body}"
+        body = secrets.token_urlsafe(48).replace("-", "").replace("_", "")[:32]
+        pos = secrets.randbelow(len(body) - len(cls.KEY_MARKER) + 1)
+        if pos == 0:
+            pos = 1  # 不要紧跟前缀
+        body = body[:pos] + cls.KEY_MARKER + body[pos:]
+        return f"{cls.KEY_PREFIX}{body}"
 
     def create_key(self, *, member_id=None, ip_allowlist="", model_allowlist="",
                    note="") -> tuple[int, str]:

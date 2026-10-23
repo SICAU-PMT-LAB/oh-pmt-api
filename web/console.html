@@ -151,6 +151,7 @@
       <a href="#usage" data-page="usage" class="active"><span class="ico">◈</span>用量</a>
       <a href="#models" data-page="models"><span class="ico">◇</span>模型</a>
       <a href="#guide" data-page="guide"><span class="ico">▤</span>接入</a>
+      <a href="#" id="logout"><span class="ico">⏻</span>退出登录</a>
     </nav>
   </aside>
 
@@ -207,6 +208,7 @@
 </div>
 
 <script>
+// 优先用 API Key（SDK 用户直接带 key 访问），否则用登录会话
 const params = new URLSearchParams(location.search);
 const KEY = params.get('key') || localStorage.getItem('q2a_member_key') || '';
 if (KEY) localStorage.setItem('q2a_member_key', KEY);
@@ -217,7 +219,12 @@ const num = (n, d = 2) => Number(n || 0).toFixed(d);
 const int = n => (n || 0).toLocaleString('en-US');
 
 async function api(path) {
-  const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + KEY } });
+  const headers = KEY ? { 'Authorization': 'Bearer ' + KEY } : {};
+  const res = await fetch(path, { headers, credentials: 'same-origin' });
+  if (res.status === 401) {
+    location.href = '/login';
+    throw new Error('请先登录');
+  }
   const text = await res.text();
   let data = {};
   try { data = JSON.parse(text); } catch { data = { error: { message: text } }; }
@@ -248,11 +255,6 @@ function renderBars(el, data, key, fmt) {
 }
 
 async function load() {
-  if (!KEY) {
-    document.getElementById('quota-grid').innerHTML =
-      '<div class="note">缺少密钥。请使用管理员给你的链接访问，或在地址后附加 <span class="mono">?key=…</span>。</div>';
-    return;
-  }
   try {
     const d = await api('/api/me');
     document.getElementById('who-name').textContent = d.member.name;
@@ -296,7 +298,8 @@ async function load() {
       : '<div class="empty">管理员未开放任何模型</div>';
 
     document.getElementById('key-info').innerHTML = `
-      <div class="mono">密钥前缀：${esc(d.key.prefix)}…</div>
+      ${d.member.username ? `<div class="mono">登录账号：${esc(d.member.username)}</div>` : ''}
+      ${d.key.prefix ? `<div class="mono" style="margin-top:8px">密钥前缀：${esc(d.key.prefix)}…</div>` : ''}
       <div class="hint" style="margin-top:10px">允许的来源 IP：${
         d.key.ip_allowlist ? esc(d.key.ip_allowlist) : '不限制'}</div>
       ${d.preferred_account ? `<div class="hint">优先使用的账号：${esc(d.preferred_account)}</div>` : ''}`;
@@ -306,7 +309,7 @@ async function load() {
     document.getElementById('api-url').textContent = base;
     document.getElementById('curl-example').textContent =
 `curl ${base} \\
-  -H "Authorization: Bearer ${d.key.prefix}..." \\
+  -H "Authorization: Bearer ${d.key.prefix ? d.key.prefix + '...' : '你的密钥'}" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
   } catch (e) {
@@ -314,6 +317,13 @@ async function load() {
       `<div class="note">${esc(e.message)}</div>`;
   }
 }
+document.getElementById('logout').addEventListener('click', async e => {
+  e.preventDefault();
+  localStorage.removeItem('q2a_member_key');
+  await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+  location.href = '/login';
+});
+
 load();
 </script>
 </body>
