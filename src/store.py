@@ -247,18 +247,23 @@ class Store:
             if region:
                 sql += " WHERE region=?"
                 args = (region,)
-            return [dict(r) for r in c.execute(sql + " ORDER BY id")]
+            return [dict(r) for r in c.execute(sql + " ORDER BY id", args)]
 
     def get_account(self, account_id: int) -> dict | None:
         with self._conn() as c:
             r = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
             return dict(r) if r else None
 
-    def pick_account(self, region: str, prefer_id: int | None = None) -> dict | None:
-        """选账号：优先指定的那个，不可用时回退到同区域最久未用的。"""
+    def pick_account(self, region: str, prefer_id: int | None = None,
+                     exclude: set[int] | None = None) -> dict | None:
+        """选账号：优先指定的那个，不可用时回退到同区域最久未用的。
+
+        exclude 里的账号会被跳过，用于一个账号排队时换到别的账号重试。
+        """
         now = time.time()
+        skip = tuple(exclude or ())
         with self._conn() as c:
-            if prefer_id:
+            if prefer_id and prefer_id not in skip:
                 r = c.execute(
                     """SELECT * FROM accounts WHERE id=? AND region=? AND enabled=1
                        AND cooldown_until < ?""",
@@ -266,12 +271,14 @@ class Store:
                 ).fetchone()
                 if r:
                     return dict(r)
-            r = c.execute(
-                """SELECT * FROM accounts
-                   WHERE region=? AND enabled=1 AND cooldown_until < ?
-                   ORDER BY last_used_at ASC, id ASC LIMIT 1""",
-                (region, now),
-            ).fetchone()
+            sql = ("SELECT * FROM accounts "
+                   "WHERE region=? AND enabled=1 AND cooldown_until < ?")
+            args = [region, now]
+            if skip:
+                sql += " AND id NOT IN (%s)" % ",".join("?" * len(skip))
+                args.extend(skip)
+            sql += " ORDER BY last_used_at ASC, id ASC LIMIT 1"
+            r = c.execute(sql, args).fetchone()
             return dict(r) if r else None
 
     def touch_account(self, account_id: int):

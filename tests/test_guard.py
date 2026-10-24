@@ -205,6 +205,22 @@ class TestStore(QuotaBase):
         self.store.set_account_cooldown(a, 300, "err")
         self.assertIsNone(self.store.pick_account("global"))
 
+    def test_pick_excludes_tried_accounts(self):
+        """一个账号排队时换别的账号重试，试过的要跳过、试遍了返回 None。"""
+        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
+        b = self.store.add_account(uid="u2", region="global", pat="pt-b")
+        first = self.store.pick_account("global")
+        second = self.store.pick_account("global", exclude={first["id"]})
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertIn(first["id"], (a, b))
+        self.assertIsNone(self.store.pick_account("global", exclude={a, b}))
+
+    def test_list_accounts_filters_by_region(self):
+        self.store.add_account(uid="u1", region="global", pat="pt-a")
+        self.store.add_account(uid="u2", region="cn", pat="pt-b")
+        self.assertEqual([x["region"] for x in self.store.list_accounts("cn")], ["cn"])
+        self.assertEqual(len(self.store.list_accounts()), 2)
+
     def test_member_default_models(self):
         mid = self.store.create_member(name="x")
         m = self.store.get_member(mid)

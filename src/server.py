@@ -650,12 +650,21 @@ class Handler(BaseHTTPRequestHandler):
 
             deadline = time.time() + QUEUE_MAX_WAIT
             round_no = 0
+            tried = {account["id"]}
             while True:
                 lines = qoder.chat_stream(account, payload, model)
                 first = next(iter(lines), None)
                 wait = qoder.queue_info(first or "")
                 if not wait:
                     break
+                # 排队是账号级的（上游对该账号限流），换一个账号往往立刻就能用。
+                # 先把同区域的其他账号试一遍，都不行再回到当前账号干等。
+                spare = store.pick_account(region, exclude=tried)
+                if spare is not None:
+                    tried.add(spare["id"])
+                    account = ensure_fresh_token(spare)
+                    ctx["account_id"] = account["id"]
+                    continue
                 round_no += 1
                 left = deadline - time.time()
                 if left <= 0 or round_no > QUEUE_MAX_ROUNDS:
