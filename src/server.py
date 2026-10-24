@@ -44,6 +44,10 @@ def _unsign(signed: str) -> str | None:
         return None
     return value
 
+# 排队时网关自己等，不把 429 甩给客户端（客户端重试几次就放弃了）
+QUEUE_MAX_WAIT = 180      # 最多等这么多秒
+QUEUE_MAX_ROUNDS = 6      # 最多重试这么多轮
+
 _MODEL_CACHE: dict[str, tuple[float, list]] = {}
 _MODEL_LOCK = threading.Lock()
 _REFRESH_LOCK = threading.Lock()
@@ -166,6 +170,31 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(status, {"error": {"code": code, "message": message,
                                            "type": code}},
                         extra_headers=extra)
+
+    def _stream_queue_notice(self, round_no: int, wait: int, left: float):
+        """流已开启但上游在排队，发一条进度事件让客户端知道还在等。"""
+        ev = {"type": "queue", "round": round_no,
+              "retry_after": wait, "remaining": int(left),
+              "message": f"上游模型繁忙，{wait} 秒后重试（剩余 {int(left)} 秒）"}
+        try:
+            self.wfile.write((f": queued round={round_no} wait={wait}\n\n").encode())
+            self.wfile.write(convert.to_sse(json.dumps(ev, ensure_ascii=False)))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
+
+    def _stream_queue_giveup(self, rounds: int, wait: int):
+        """等到上限仍未就绪，在流内告知并结束。"""
+        err = {"error": {"code": "upstream_busy",
+                         "message": f"上游模型繁忙，已重试 {rounds} 轮仍未就绪，请稍后再试",
+                         "type": "upstream_busy", "retry_after": wait}}
+        try:
+            self.wfile.write(convert.to_sse(json.dumps(err, ensure_ascii=False)))
+            self.wfile.write(convert.DONE)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self.close_connection = True
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -496,6 +525,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _chat_completions(self):
+        self._stream_started = False
         auth = self._auth_key()
         if auth is None:
             return
@@ -540,15 +570,38 @@ class Handler(BaseHTTPRequestHandler):
                 tools=body.get("tools"),
                 parameters={"max_tokens": body.get("max_tokens") or 8192},
             )
-            lines = qoder.chat_stream(account, payload, model)
             # 上游排队时返回 HTTP 200，但首帧就是 10605 错误信封。
-            # 先取首帧检查，把排队挡在开流之前，避免先回 200 再在流里报错。
-            first = next(iter(lines), None)
-            queued = qoder.queue_info(first or "")
-            if queued:
-                return self._error(429, "upstream_busy",
-                                   "上游模型繁忙，请稍后重试",
-                                   retry_after=queued)
+            # 官方客户端会显示"排队中"并继续等；普通客户端只会重试几次就放弃，
+            # 所以把等待收进网关。流式请求先开流再等，期间用注释帧保活并
+            # 通知排队进度，客户端不至于因为长时间无数据而超时。
+            if stream:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self._stream_started = True
+
+            deadline = time.time() + QUEUE_MAX_WAIT
+            round_no = 0
+            while True:
+                lines = qoder.chat_stream(account, payload, model)
+                first = next(iter(lines), None)
+                wait = qoder.queue_info(first or "")
+                if not wait:
+                    break
+                round_no += 1
+                left = deadline - time.time()
+                if left <= 0 or round_no > QUEUE_MAX_ROUNDS:
+                    if stream:
+                        self._stream_queue_giveup(round_no - 1, wait)
+                        return
+                    return self._error(429, "upstream_busy",
+                                       f"上游模型繁忙，已等待 {round_no - 1} 轮仍未就绪",
+                                       retry_after=wait)
+                if stream:
+                    self._stream_queue_notice(round_no, wait, left)
+                time.sleep(min(wait, max(1, left)))
 
             def _replay():
                 if first is not None:
@@ -558,25 +611,36 @@ class Handler(BaseHTTPRequestHandler):
             lines = _replay()
         except qoder.UpstreamError as e:
             if e.is_queued:
-                # 模型侧排队，账号没问题，不要冷却，让客户端稍后重试
-                return self._error(429, "upstream_busy",
-                                   "上游模型繁忙，请稍后重试", retry_after=e.retry_after())
-            if e.is_rate_limited:
-                return self._error(429, "upstream_rate_limited",
-                                   "上游限流，请稍后重试", retry_after=e.retry_after())
-            store.set_account_cooldown(account["id"], 60, str(e))
-            return self._error(502, "upstream_error", str(e))
+                code, msg, wait = "upstream_busy", "上游模型繁忙，请稍后重试", e.retry_after()
+            elif e.is_rate_limited:
+                code, msg, wait = "upstream_rate_limited", "上游限流，请稍后重试", e.retry_after()
+            else:
+                store.set_account_cooldown(account["id"], 60, str(e))
+                code, msg, wait = "upstream_error", str(e), 0
+            if getattr(self, "_stream_started", False):
+                err = {"error": {"code": code, "message": msg, "type": code}}
+                try:
+                    self.wfile.write(convert.to_sse(json.dumps(err, ensure_ascii=False)))
+                    self.wfile.write(convert.DONE)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                self.close_connection = True
+                return
+            return self._error(429 if code != "upstream_error" else 502,
+                               code, msg, retry_after=wait)
 
         store.touch_account(account["id"])
         holder: dict = {}
 
         try:
             if stream:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "close")
-                self.end_headers()
+                if not getattr(self, "_stream_started", False):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
                 try:
                     for chunk_json in convert.iter_chunks(lines, holder):
                         self.wfile.write(convert.to_sse(chunk_json))
