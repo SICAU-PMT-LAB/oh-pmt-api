@@ -40,6 +40,8 @@ TRUST_FORWARDED = _env("TRUST_FORWARDED", "0") == "1"
 SESSION_COOKIE = "q2a_session"
 # 会话签名密钥：优先用环境变量，否则用固定串（重启后会话仍有效）
 _SESSION_KEY = _env("SESSION_KEY").encode() or b"oh-pmt-api-local-session-key"
+# 改名前签发的 cookie 用旧密钥签的，验签时一并接受，免得升级就把人踢下线
+_LEGACY_SESSION_KEYS = [b"qoder2api-local-session-key"]
 
 
 def _mask(secret: str, keep: int = 6) -> str:
@@ -60,10 +62,11 @@ def _unsign(signed: str) -> str | None:
     if not signed or "." not in signed:
         return None
     value, _, sig = signed.rpartition(".")
-    want = hmac.new(_SESSION_KEY, value.encode(), hashlib.sha256).hexdigest()[:32]
-    if not secrets.compare_digest(sig, want):
-        return None
-    return value
+    for key in [_SESSION_KEY] + _LEGACY_SESSION_KEYS:
+        want = hmac.new(key, value.encode(), hashlib.sha256).hexdigest()[:32]
+        if secrets.compare_digest(sig, want):
+            return value
+    return None
 
 
 # 排队时网关自己等，不把 429 甩给客户端（客户端重试几次就放弃了）
