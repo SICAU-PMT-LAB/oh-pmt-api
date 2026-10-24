@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import convert
+from qoder import resolve_model
 import guard
 import qoder
 from store import Store
@@ -434,8 +435,17 @@ class Handler(BaseHTTPRequestHandler):
         for mid, m in all_models().items():
             if allowed and mid not in allowed:
                 continue
-            data.append({"id": mid, "object": "model",
-                         "owned_by": f"qoder-{m.get('region', 'global')}"})
+            full = m.get("name") or mid
+            data.append({
+                # 客户端普遍直接展示 id，所以 id 给完整名称；
+                # 上游只认缩写 key，请求进来时由 resolve_model 换回去
+                "id": full,
+                "object": "model",
+                "name": full,
+                "display_name": full,
+                "upstream_key": mid,
+                "owned_by": f"qoder-{m.get('region', 'global')}",
+            })
         return self._send_json(200, {"object": "list", "data": data})
 
     # ---------------- 登录 ----------------
@@ -495,13 +505,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e.status, e.code, e.message)
 
         body = self._read_json()
-        model = (body.get("model") or "").strip()
+        requested = (body.get("model") or "").strip()
         messages = body.get("messages") or []
-        if not model or not messages:
+        if not requested or not messages:
             return self._error(400, "bad_request", "缺少 model 或 messages")
 
+        # 客户端可以用完整名称或缩写，这里统一换成上游 key
+        catalog = all_models()
+        model = resolve_model(requested, catalog) or requested
+
         try:
-            guard.check_model(key, member, model)
+            guard.check_model(key, member, model, catalog)
         except guard.Denied as e:
             return self._error(e.status, e.code, e.message)
 

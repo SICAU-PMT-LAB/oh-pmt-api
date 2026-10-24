@@ -79,12 +79,22 @@ def allowed_models(key: dict, member: dict | None) -> set[str]:
     return key_set if key_set else (member_set or set())
 
 
-def check_model(key: dict, member: dict | None, model: str):
+def check_model(key: dict, member: dict | None, model: str, catalog: dict | None = None):
+    """白名单里可以写上游 key，也可以写完整名称，两者都算通过。"""
     allowed = allowed_models(key, member)
     if not allowed:
         return
     if model in allowed:
         return
+    # 白名单写的是完整名称时，用解析后的 key 反查名称再比一次
+    if catalog:
+        full = (catalog.get(model) or {}).get("name")
+        if full and full in allowed:
+            return
+        for alias in allowed:
+            from qoder import resolve_model
+            if resolve_model(alias, catalog) == model:
+                return
     raise Denied(403, "model_forbidden",
                  f"该密钥不允许使用模型 {model}，可用：{', '.join(sorted(allowed))}")
 

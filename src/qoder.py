@@ -187,11 +187,60 @@ def list_models(account: dict) -> list[dict]:
             if mid:
                 out.append({
                     "id": mid,
-                    "name": m.get("display_name") or m.get("name") or mid,
+                    "name": display_name(mid, m.get("display_name") or m.get("name") or mid),
                     "source": m.get("source") or "system",
                     "enable": m.get("enable", True),
                 })
     return out
+
+
+# 上游命名不统一（Qwen3.8-Flash 无连字符、GLM-5.3-Flash 有），
+# 对外统一成 "<家族>-<版本>-<档位>" 的写法，只影响展示。
+DISPLAY_NAMES = {
+    "qmodel_38max": "Qwen-3.8-Max",
+    "qfmodel": "Qwen-3.8-Flash",
+    "kmodel_latest": "Kimi-K3",
+    "kmodel": "Kimi-K2.8-Preview",
+}
+
+
+def display_name(upstream_key: str, raw: str) -> str:
+    """把上游的 display_name 规范成统一风格。"""
+    return DISPLAY_NAMES.get(upstream_key) or raw
+
+
+def resolve_model(name: str, catalog: dict) -> str | None:
+    """把客户端传的模型名解析成上游 key。
+
+    上游只认缩写（gfmodel 这种），传完整名称会静默返回空内容。
+    所以这里允许客户端用完整名称、缩写或大小写变体，统一转成上游 key。
+    返回 None 表示没有匹配。
+    """
+    if not name:
+        return None
+    raw = name.strip()
+    if raw in catalog:
+        return raw
+
+    low = raw.lower()
+    # 去掉区域后缀再比一次
+    base = low[:-3] if low.endswith("-cn") else low
+    if base in catalog:
+        return base
+
+    for mid, meta in catalog.items():
+        full = (meta.get("name") or "").strip().lower()
+        if full and (full == base or full == low):
+            return mid
+    # 宽松匹配：忽略空格和点，例如 "glm 5.3 flash" / "GLM5.3Flash"
+    squash = lambda x: x.replace(" ", "").replace(".", "").replace("-", "")
+    target = squash(base)
+    for mid, meta in catalog.items():
+        if squash((meta.get("name") or "").strip().lower()) == target:
+            return mid
+        if squash(mid) == target:
+            return mid
+    return None
 
 
 def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
