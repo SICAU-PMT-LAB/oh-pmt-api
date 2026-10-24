@@ -211,6 +211,9 @@ def list_models(account: dict) -> list[dict]:
                     "name": display_name(mid, m.get("display_name") or m.get("name") or mid),
                     "source": m.get("source") or "system",
                     "enable": m.get("enable", True),
+                    # 思考能力随目录一起带下来，请求侧要用它判断能发哪些档位
+                    "is_reasoning": bool(m.get("is_reasoning")),
+                    "thinking_config": m.get("thinking_config") or {},
                 })
     return out
 
@@ -281,9 +284,81 @@ def resolve_model(name: str, catalog: dict) -> str | None:
     return None
 
 
+EFFORT_RANK = {"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4,
+               "xhigh": 5, "max": 6}
+EFFORT_OFF = ("none", "off", "disabled", "disable", "false", "0", "no")
+
+
+def supported_efforts(meta: dict | None) -> list[str]:
+    """该模型官方支持的思考档位，取自目录里的 thinking_config。
+
+    空列表表示这个模型只有开/关、没有档位可调。
+    """
+    tc = (meta or {}).get("thinking_config") or {}
+    enabled = tc.get("enabled") if isinstance(tc.get("enabled"), dict) else {}
+    efforts = enabled.get("efforts") if isinstance(enabled.get("efforts"), dict) else {}
+    return [e for e in EFFORT_RANK if e in efforts]
+
+
+def default_effort(meta: dict | None) -> str | None:
+    """该模型官方默认档位，取自 thinking_config.enabled.efforts 里的 is_default。"""
+    tc = (meta or {}).get("thinking_config") or {}
+    enabled = tc.get("enabled") if isinstance(tc.get("enabled"), dict) else {}
+    efforts = enabled.get("efforts") if isinstance(enabled.get("efforts"), dict) else {}
+    for name, cfg in efforts.items():
+        if isinstance(cfg, dict) and cfg.get("is_default"):
+            return name
+    return None
+
+
+def normalize_effort(effort, meta: dict | None) -> str | None:
+    """把客户端请求的档位对齐到该模型支持的集合，None 表示不下发。
+
+    上游对不认识的档位不报错、直接忽略，所以这里先把关：不支持的档位取
+    最接近的合法档位，距离相同时优先该模型的默认档，避免客户端以为设置
+    生效、实际回到默认档。
+    """
+    e = str(effort or "").strip().lower()
+    if not e:
+        return None
+    if e in EFFORT_OFF:
+        return "none"
+    sup = supported_efforts(meta)
+    if not sup:
+        return None
+    if e in sup:
+        return e
+    if e not in EFFORT_RANK:
+        return None
+    want = EFFORT_RANK[e]
+    fallback = EFFORT_RANK.get(default_effort(meta) or "", want)
+
+    def distance(cand):
+        return (abs(EFFORT_RANK[cand] - want), abs(EFFORT_RANK[cand] - fallback))
+
+    return min(sup, key=distance)
+
+
+def requested_effort(body: dict | None) -> str | None:
+    """从 OpenAI 风格请求体取思考档位，兼容几种常见写法。"""
+    if not isinstance(body, dict):
+        return None
+    effort = body.get("reasoning_effort")
+    if not effort and isinstance(body.get("reasoning"), dict):
+        effort = body["reasoning"].get("effort")
+    if not effort and isinstance(body.get("thinking"), dict):
+        thinking = body["thinking"]
+        effort = thinking.get("effort") or thinking.get("level")
+    return effort or None
+
+
 def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
-                    tools: list | None = None, parameters: dict | None = None) -> bytes:
-    """把 OpenAI 风格 messages 转成 Qoder 私有请求体，并做自定义编码。"""
+                    tools: list | None = None, parameters: dict | None = None,
+                    meta: dict | None = None) -> bytes:
+    """把 OpenAI 风格 messages 转成 Qoder 私有请求体，并做自定义编码。
+
+    meta 是该模型在目录里的元数据，用来声明 is_reasoning；缺失时按不支持思考处理。
+    """
     import uuid as _uuid
 
     # system 必须放进 messages 数组，顶层 system 字段服务端会忽略
@@ -301,6 +376,7 @@ def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
     record_id = str(_uuid.uuid4())
     params = {"max_tokens": 8192}
     params.update(parameters or {})
+    is_reasoning = bool((meta or {}).get("is_reasoning"))
 
     body = {
         "request_id": str(_uuid.uuid4()),
@@ -329,13 +405,13 @@ def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
             "imageUrls": None,
             "extra": {
                 "context": [],
-                "modelConfig": {"key": model, "is_reasoning": False},
+                "modelConfig": {"key": model, "is_reasoning": is_reasoning},
                 "originalContent": str(last_user)[:2000],
             },
             "features": [],
             "text": str(last_user)[:2000],
         },
-        "model_config": {"key": model, "source": "system", "is_reasoning": False},
+        "model_config": {"key": model, "source": "system", "is_reasoning": is_reasoning},
         "business": {
             "product": "cli",
             "version": "1.0.0",

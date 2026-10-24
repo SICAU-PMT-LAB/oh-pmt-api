@@ -623,10 +623,18 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             account = ensure_fresh_token(account)
+            parameters = {"max_tokens": body.get("max_tokens")
+                          or body.get("max_completion_tokens") or 8192}
+            # 思考档位：客户端传什么由这里的 normalize_effort 对齐到该模型
+            # 官方支持的集合，不支持的档位上游会静默忽略、回落默认档
+            effort = qoder.normalize_effort(qoder.requested_effort(body), catalog.get(model))
+            if effort:
+                parameters["reasoning_effort"] = effort
             payload = qoder.build_chat_body(
                 messages, model, stream=True,
                 tools=body.get("tools"),
-                parameters={"max_tokens": body.get("max_tokens") or 8192},
+                parameters=parameters,
+                meta=catalog.get(model),
             )
             # 上游排队时返回 HTTP 200，但首帧就是 10605 错误信封。
             # 官方客户端会显示"排队中"并继续等；普通客户端只会重试几次就放弃，
