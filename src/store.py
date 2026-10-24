@@ -24,13 +24,29 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_error      TEXT DEFAULT '',
     last_used_at    REAL DEFAULT 0,
     cooldown_until  REAL DEFAULT 0,
-    -- 积分快照，由上游 quota 接口刷新
+    -- 积分快照，由上游 quota 接口刷新（total/used/remaining 是全部额度合计）
     credits_total   REAL DEFAULT 0,
     credits_used    REAL DEFAULT 0,
     credits_remaining REAL DEFAULT 0,
     credits_addon   REAL DEFAULT 0,
+    -- 分项：基础套餐 / 赠送与签到 / 共享池
+    credits_base_total REAL DEFAULT 0,
+    credits_base_used REAL DEFAULT 0,
+    credits_base_remaining REAL DEFAULT 0,
+    credits_addon_total REAL DEFAULT 0,
+    credits_addon_used REAL DEFAULT 0,
+    credits_shared_total REAL DEFAULT 0,
+    credits_shared_used REAL DEFAULT 0,
+    credits_shared_remaining REAL DEFAULT 0,
+    credits_expire_at REAL DEFAULT 0,
+    credits_exceeded INTEGER DEFAULT 0,
     plan_name       TEXT DEFAULT '',
     credits_synced_at REAL DEFAULT 0,
+    -- 最近一次签到结果
+    checkin_at      REAL DEFAULT 0,
+    checkin_ok      INTEGER DEFAULT 0,
+    checkin_earned  REAL DEFAULT 0,
+    checkin_message TEXT DEFAULT '',
     created_at      REAL NOT NULL,
     UNIQUE(uid, region)
 );
@@ -80,7 +96,9 @@ CREATE TABLE IF NOT EXISTS usage (
     total_tokens    INTEGER DEFAULT 0,
     credits         REAL DEFAULT 0,
     credits_original REAL DEFAULT 0,
+    -- 200 = 成功；其余是失败（error 存错误码，如 upstream_busy）
     status          INTEGER DEFAULT 200,
+    error           TEXT DEFAULT '',
     ip              TEXT DEFAULT '',
     created_at      REAL NOT NULL
 );
@@ -152,8 +170,22 @@ class Store:
             ("credits_used", "REAL DEFAULT 0"),
             ("credits_remaining", "REAL DEFAULT 0"),
             ("credits_addon", "REAL DEFAULT 0"),
+            ("credits_base_total", "REAL DEFAULT 0"),
+            ("credits_base_used", "REAL DEFAULT 0"),
+            ("credits_base_remaining", "REAL DEFAULT 0"),
+            ("credits_addon_total", "REAL DEFAULT 0"),
+            ("credits_addon_used", "REAL DEFAULT 0"),
+            ("credits_shared_total", "REAL DEFAULT 0"),
+            ("credits_shared_used", "REAL DEFAULT 0"),
+            ("credits_shared_remaining", "REAL DEFAULT 0"),
+            ("credits_expire_at", "REAL DEFAULT 0"),
+            ("credits_exceeded", "INTEGER DEFAULT 0"),
             ("plan_name", "TEXT DEFAULT ''"),
             ("credits_synced_at", "REAL DEFAULT 0"),
+            ("checkin_at", "REAL DEFAULT 0"),
+            ("checkin_ok", "INTEGER DEFAULT 0"),
+            ("checkin_earned", "REAL DEFAULT 0"),
+            ("checkin_message", "TEXT DEFAULT ''"),
         ):
             if name not in acc_cols:
                 c.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
@@ -184,6 +216,7 @@ class Store:
             ("member_id", "INTEGER"),
             ("credits", "REAL DEFAULT 0"),
             ("credits_original", "REAL DEFAULT 0"),
+            ("error", "TEXT DEFAULT ''"),
         ):
             if name not in use_cols:
                 c.execute(f"ALTER TABLE usage ADD COLUMN {name} {decl}")
@@ -256,13 +289,37 @@ class Store:
             )
 
     def set_account_credits(self, account_id: int, *, total: float, used: float,
-                            remaining: float, addon: float, plan: str = ""):
+                            remaining: float, addon: float, plan: str = "",
+                            base_total: float = 0, base_used: float = 0,
+                            base_remaining: float = 0, addon_total: float = 0,
+                            addon_used: float = 0, shared_total: float = 0,
+                            shared_used: float = 0, shared_remaining: float = 0,
+                            expire_at: float = 0, exceeded: bool = False):
         with self._conn() as c:
             c.execute(
                 """UPDATE accounts SET credits_total=?, credits_used=?,
                    credits_remaining=?, credits_addon=?, plan_name=?,
+                   credits_base_total=?, credits_base_used=?, credits_base_remaining=?,
+                   credits_addon_total=?, credits_addon_used=?,
+                   credits_shared_total=?, credits_shared_used=?,
+                   credits_shared_remaining=?, credits_expire_at=?, credits_exceeded=?,
                    credits_synced_at=? WHERE id=?""",
-                (total, used, remaining, addon, plan, time.time(), account_id),
+                (total, used, remaining, addon, plan,
+                 base_total, base_used, base_remaining,
+                 addon_total, addon_used,
+                 shared_total, shared_used, shared_remaining,
+                 expire_at, 1 if exceeded else 0,
+                 time.time(), account_id),
+            )
+
+    def set_account_checkin(self, account_id: int, *, ok: bool, earned: float = 0,
+                            message: str = ""):
+        with self._conn() as c:
+            c.execute(
+                """UPDATE accounts SET checkin_at=?, checkin_ok=?, checkin_earned=?,
+                   checkin_message=? WHERE id=?""",
+                (time.time(), 1 if ok else 0, float(earned or 0),
+                 message[:300], account_id),
             )
 
     def set_account_cooldown(self, account_id: int, seconds: int, error: str = ""):
@@ -443,17 +500,17 @@ class Store:
 
     def record_usage(self, *, key_id, member_id, account_id, model,
                      prompt_tokens, completion_tokens, credits=0.0,
-                     credits_original=0.0, status=200, ip=""):
+                     credits_original=0.0, status=200, error="", ip=""):
         total = prompt_tokens + completion_tokens
         with self._conn() as c:
             c.execute(
                 """INSERT INTO usage (key_id, member_id, account_id, model,
                      prompt_tokens, completion_tokens, total_tokens, credits,
-                     credits_original, status, ip, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     credits_original, status, error, ip, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (key_id, member_id, account_id, model, prompt_tokens,
                  completion_tokens, total, float(credits), float(credits_original),
-                 status, ip, time.time()),
+                 int(status), (error or "")[:80], ip, time.time()),
             )
 
     def credits_since(self, member_id: int, since: float) -> float:
@@ -491,11 +548,81 @@ class Store:
         since = since if since is not None else time.time() - 7 * 86400
         with self._conn() as c:
             rows = c.execute(
-                """SELECT model, COUNT(*) n, SUM(total_tokens) tokens,
+                """SELECT model, COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     SUM(prompt_tokens) prompt_tokens,
+                     SUM(completion_tokens) completion_tokens,
+                     SUM(total_tokens) tokens,
                      SUM(credits) credits FROM usage WHERE created_at>=?
-                   GROUP BY model ORDER BY credits DESC""", (since,)
+                   GROUP BY model ORDER BY credits DESC, n DESC""", (since,)
             )
             return [dict(r) for r in rows]
+
+    def usage_totals(self, since: float = 0) -> dict:
+        """总请求量、成功数、Token 与积分。"""
+        with self._conn() as c:
+            r = c.execute(
+                """SELECT COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     COALESCE(SUM(prompt_tokens),0) prompt_tokens,
+                     COALESCE(SUM(completion_tokens),0) completion_tokens,
+                     COALESCE(SUM(total_tokens),0) tokens,
+                     COALESCE(SUM(credits),0) credits
+                   FROM usage WHERE created_at>=?""", (since,)
+            ).fetchone()
+        n = int(r["n"] or 0)
+        ok = int(r["ok"] or 0)
+        return {
+            "requests": n,
+            "ok": ok,
+            "errors": int(r["err"] or 0),
+            "success_rate": round(ok * 100.0 / n, 2) if n else None,
+            "prompt_tokens": int(r["prompt_tokens"] or 0),
+            "completion_tokens": int(r["completion_tokens"] or 0),
+            "tokens": int(r["tokens"] or 0),
+            "credits": round(float(r["credits"] or 0), 4),
+        }
+
+    def account_summary(self, since: float = 0) -> dict[int, dict]:
+        """每个账号的请求量 / Token / 积分，附带按模型拆分。"""
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT account_id, model, COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     COALESCE(SUM(total_tokens),0) tokens,
+                     COALESCE(SUM(credits),0) credits
+                   FROM usage WHERE created_at>=? GROUP BY account_id, model""", (since,)
+            )
+            out: dict[int, dict] = {}
+            for r in rows:
+                aid = r["account_id"]
+                if aid is None:
+                    continue
+                cell = out.setdefault(int(aid), {
+                    "requests": 0, "ok": 0, "errors": 0,
+                    "tokens": 0, "credits": 0.0, "by_model": [],
+                })
+                n, ok = int(r["n"] or 0), int(r["ok"] or 0)
+                cell["requests"] += n
+                cell["ok"] += ok
+                cell["errors"] += int(r["err"] or 0)
+                cell["tokens"] += int(r["tokens"] or 0)
+                cell["credits"] += float(r["credits"] or 0)
+                cell["by_model"].append({
+                    "id": r["model"] or "",
+                    "requests": n, "ok": ok, "errors": int(r["err"] or 0),
+                    "tokens": int(r["tokens"] or 0),
+                    "credits": round(float(r["credits"] or 0), 4),
+                })
+            for cell in out.values():
+                cell["credits"] = round(cell["credits"], 4)
+                cell["success_rate"] = (round(cell["ok"] * 100.0 / cell["requests"], 2)
+                                        if cell["requests"] else None)
+                cell["by_model"].sort(key=lambda m: m["credits"], reverse=True)
+            return out
 
     def daily_series(self, days: int = 14) -> list[dict]:
         """最近 N 天的每日请求数与积分，供图表使用。"""
@@ -506,13 +633,16 @@ class Store:
             end = start + 86400
             with self._conn() as c:
                 r = c.execute(
-                    """SELECT COUNT(*) n, COALESCE(SUM(credits),0) c,
+                    """SELECT COUNT(*) n,
+                         SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                         COALESCE(SUM(credits),0) c,
                          COALESCE(SUM(total_tokens),0) t FROM usage
                        WHERE created_at>=? AND created_at<?""", (start, end)
                 ).fetchone()
             out.append({
                 "date": time.strftime("%m-%d", time.localtime(start)),
                 "requests": int(r["n"]),
+                "errors": int(r["err"] or 0),
                 "credits": round(float(r["c"]), 4),
                 "tokens": int(r["t"]),
             })
@@ -522,9 +652,29 @@ class Store:
         since = since if since is not None else time.time() - 7 * 86400
         with self._conn() as c:
             rows = c.execute(
-                """SELECT member_id, COUNT(*) n, COALESCE(SUM(credits),0) credits,
+                """SELECT member_id, COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     COALESCE(SUM(credits),0) credits,
                      COALESCE(SUM(total_tokens),0) tokens FROM usage
                    WHERE created_at>=? GROUP BY member_id""", (since,)
+            )
+            return [dict(r) for r in rows]
+
+    def member_model_summary(self, member_id: int, since: float = 0) -> list[dict]:
+        """单个成员按模型的请求量 / Token / 积分（成员页明细用）。"""
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT model, COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     COALESCE(SUM(prompt_tokens),0) prompt_tokens,
+                     COALESCE(SUM(completion_tokens),0) completion_tokens,
+                     COALESCE(SUM(total_tokens),0) tokens,
+                     COALESCE(SUM(credits),0) credits
+                   FROM usage WHERE member_id=? AND created_at>=?
+                   GROUP BY model ORDER BY credits DESC, n DESC""",
+                (member_id, since),
             )
             return [dict(r) for r in rows]
 

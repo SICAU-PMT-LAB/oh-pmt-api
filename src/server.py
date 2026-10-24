@@ -17,7 +17,7 @@ import convert
 from qoder import resolve_model
 import guard
 import qoder
-from store import Store
+from store import Store, day_start
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("Q2A_DATA", os.path.join(BASE_DIR, "data"))
@@ -110,8 +110,49 @@ def sync_account_credits(account: dict) -> dict | None:
         account["id"],
         total=q["total"], used=q["used"], remaining=q["remaining"],
         addon=q["addon_remaining"], plan=q["plan"],
+        base_total=q["base_total"], base_used=q["base_used"],
+        base_remaining=q["base_remaining"],
+        addon_total=q["addon_total"], addon_used=q["addon_used"],
+        shared_total=q["shared_total"], shared_used=q["shared_used"],
+        shared_remaining=q["shared_remaining"],
+        expire_at=q["expire_at"], exceeded=q["exceeded"],
     )
     return q
+
+
+def checkin_one(account: dict) -> dict:
+    """给单个账号签到并落库。
+
+    「到账多少积分」按签到前后上游额度的差额算：活动面额只是预期值，
+    实际可能延迟到账、或按人去重后本号不发。
+    """
+    store = get_store()
+    acc = ensure_fresh_token(account)
+    before = None
+    if account["credits_synced_at"]:
+        before = float(account["credits_remaining"] or 0)
+
+    res = qoder.checkin_account(acc)
+
+    # 发放有秒级延迟，刷一次拿到新额度；刷不到就保留原快照
+    q = sync_account_credits(account)
+    earned = 0.0
+    message = res.get("message") or ""
+    if q is not None and before is not None:
+        delta = float(q["remaining"]) - before
+        if delta > 0.005:
+            earned = round(delta, 4)
+            message = f"签到成功，到账 {earned:g} 积分"
+        elif res.get("claimed"):
+            # 领取成功但额度没动：如实说清楚，别把面额当到账
+            message = (f"已领取 {res['claimed']} 个活动（面额 "
+                       f"{res.get('declared', 0):g} 积分），上游额度暂未变化")
+    store.set_account_checkin(account["id"], ok=res["ok"],
+                              earned=earned, message=message)
+    return {**res, "earned": earned, "message": message,
+            "account_id": account["id"],
+            "name": account["name"] or account["email"] or acc["uid"][:8],
+            "quota": q}
 
 
 def models_for_region(region: str, account: dict | None = None) -> list[dict]:
@@ -387,6 +428,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._auth_admin():
                     return
                 return self._sync_credits()
+            if path == "/api/accounts/checkin":
+                if not self._auth_admin():
+                    return
+                return self._checkin()
             if path == "/api/members":
                 if not self._auth_admin():
                     return
@@ -532,27 +577,39 @@ class Handler(BaseHTTPRequestHandler):
         key, member = auth
         ip = self._client_ip()
         store = get_store()
+        # 记录用：走到哪一步都记一行，失败也记，概况才能算真实成功率
+        ctx = {"model": "", "account_id": None}
+
+        def fail(status, code, message, retry_after=0):
+            store.record_usage(
+                key_id=key["id"], member_id=key["member_id"],
+                account_id=ctx["account_id"], model=ctx["model"],
+                prompt_tokens=0, completion_tokens=0,
+                status=status, error=code, ip=ip,
+            )
+            return self._error(status, code, message, retry_after=retry_after)
 
         try:
             guard.check_ip(key, ip)
             guard.check_quota(store, member)
         except guard.Denied as e:
-            return self._error(e.status, e.code, e.message)
+            return fail(e.status, e.code, e.message)
 
         body = self._read_json()
         requested = (body.get("model") or "").strip()
         messages = body.get("messages") or []
         if not requested or not messages:
-            return self._error(400, "bad_request", "缺少 model 或 messages")
+            return fail(400, "bad_request", "缺少 model 或 messages")
 
         # 客户端可以用完整名称或缩写，这里统一换成上游 key
         catalog = all_models()
         model = resolve_model(requested, catalog) or requested
+        ctx["model"] = model
 
         try:
             guard.check_model(key, member, model, catalog)
         except guard.Denied as e:
-            return self._error(e.status, e.code, e.message)
+            return fail(e.status, e.code, e.message)
 
         stream = bool(body.get("stream"))
         region = "cn" if model.endswith("-cn") else "global"
@@ -561,7 +618,8 @@ class Handler(BaseHTTPRequestHandler):
             "cn" if region == "global" else "global", prefer
         )
         if account is None:
-            return self._error(503, "no_account", f"{region} 区域没有可用账号")
+            return fail(503, "no_account", f"{region} 区域没有可用账号")
+        ctx["account_id"] = account["id"]
 
         try:
             account = ensure_fresh_token(account)
@@ -593,12 +651,18 @@ class Handler(BaseHTTPRequestHandler):
                 round_no += 1
                 left = deadline - time.time()
                 if left <= 0 or round_no > QUEUE_MAX_ROUNDS:
+                    code = "upstream_busy"
+                    msg = f"上游模型繁忙，已等待 {round_no - 1} 轮仍未就绪"
+                    store.record_usage(
+                        key_id=key["id"], member_id=key["member_id"],
+                        account_id=account["id"], model=model,
+                        prompt_tokens=0, completion_tokens=0,
+                        status=429, error=code, ip=ip,
+                    )
                     if stream:
                         self._stream_queue_giveup(round_no - 1, wait)
                         return
-                    return self._error(429, "upstream_busy",
-                                       f"上游模型繁忙，已等待 {round_no - 1} 轮仍未就绪",
-                                       retry_after=wait)
+                    return self._error(429, code, msg, retry_after=wait)
                 if stream:
                     self._stream_queue_notice(round_no, wait, left)
                 time.sleep(min(wait, max(1, left)))
@@ -617,6 +681,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 store.set_account_cooldown(account["id"], 60, str(e))
                 code, msg, wait = "upstream_error", str(e), 0
+            store.record_usage(
+                key_id=key["id"], member_id=key["member_id"],
+                account_id=account["id"], model=model,
+                prompt_tokens=0, completion_tokens=0,
+                status=429 if code != "upstream_error" else 502,
+                error=code, ip=ip,
+            )
             if getattr(self, "_stream_started", False):
                 err = {"error": {"code": code, "message": msg, "type": code}}
                 try:
@@ -632,6 +703,7 @@ class Handler(BaseHTTPRequestHandler):
 
         store.touch_account(account["id"])
         holder: dict = {}
+        failure = {"code": "", "status": 200}
 
         try:
             if stream:
@@ -648,6 +720,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(convert.DONE)
                     self.wfile.flush()
                 except convert.UpstreamStatusError as e:
+                    failure = {"code": "upstream_status", "status": 502}
                     err = {"error": {"code": "upstream_status",
                                      "message": str(e.body)[:300]}}
                     self.wfile.write(convert.to_sse(json.dumps(err)))
@@ -667,7 +740,8 @@ class Handler(BaseHTTPRequestHandler):
                 completion_tokens=int(usage.get("completion_tokens") or 0),
                 credits=float(holder.get("credits") or 0),
                 credits_original=float(holder.get("credits_original") or 0),
-                status=200,
+                status=failure["status"],
+                error=failure["code"],
                 ip=ip,
             )
 
@@ -738,6 +812,39 @@ class Handler(BaseHTTPRequestHandler):
             out.append({"id": acc["id"], "ok": bool(q), "quota": q})
         return self._send_json(200, {"results": out})
 
+    def _checkin(self):
+        """一键签到 / 单账号签到。body 带 id 就只签那个账号。"""
+        body = self._read_json()
+        store = get_store()
+        if body.get("id"):
+            try:
+                targets = [store.get_account(int(body["id"]))]
+            except (TypeError, ValueError):
+                return self._error(400, "bad_request", "账号 ID 无效")
+            targets = [a for a in targets if a]
+            if not targets:
+                return self._error(404, "account_not_found", "账号不存在")
+        else:
+            targets = [a for a in store.list_accounts() if a["enabled"]]
+
+        results = []
+        for acc in targets:
+            try:
+                results.append(checkin_one(acc))
+            except Exception as e:  # noqa: BLE001
+                store.set_account_checkin(acc["id"], ok=False, message=str(e)[:200])
+                results.append({
+                    "account_id": acc["id"],
+                    "name": acc["name"] or acc["email"],
+                    "ok": False, "earned": 0, "done": False,
+                    "message": f"签到异常：{e}", "quota": None,
+                })
+        return self._send_json(200, {
+            "results": results,
+            "earned": round(sum(r.get("earned") or 0 for r in results), 4),
+            "accounts": self._accounts_view(),
+        })
+
     def _create_member(self):
         body = self._read_json()
         name = (body.get("name") or "").strip()
@@ -779,7 +886,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _accounts_view(self) -> list[dict]:
         store = get_store()
-        consumed = store.credits_by_account()
+        stats = store.account_summary()
         all_members = store.list_members()
         # 账号 -> 绑定到它的成员名字
         bound_map: dict[int, list[str]] = {}
@@ -789,6 +896,7 @@ class Handler(BaseHTTPRequestHandler):
                 bound_map.setdefault(pid, []).append(m["name"])
         out = []
         for a in store.list_accounts():
+            st = stats.get(a["id"]) or {}
             out.append({
                 "id": a["id"], "uid": a["uid"], "region": a["region"],
                 "email": a["email"], "name": a["name"],
@@ -796,14 +904,36 @@ class Handler(BaseHTTPRequestHandler):
                 "cooldown": max(0, int(a["cooldown_until"] - time.time())),
                 "last_error": a["last_error"],
                 "expires_in": max(0, int(a["expires_at"] - time.time())),
+                # 全部额度：套餐内 + 赠送/签到 + 共享池
                 "credits_total": a["credits_total"],
                 "credits_used": a["credits_used"],
                 "credits_remaining": a["credits_remaining"],
                 "credits_addon": a["credits_addon"],
+                "credits_base_total": a["credits_base_total"],
+                "credits_base_used": a["credits_base_used"],
+                "credits_base_remaining": a["credits_base_remaining"],
+                "credits_addon_total": a["credits_addon_total"],
+                "credits_addon_used": a["credits_addon_used"],
+                "credits_addon_remaining": a["credits_addon"],
+                "credits_shared_total": a["credits_shared_total"],
+                "credits_shared_used": a["credits_shared_used"],
+                "credits_shared_remaining": a["credits_shared_remaining"],
+                "credits_expire_at": a["credits_expire_at"],
+                "credits_exceeded": bool(a["credits_exceeded"]),
                 "plan_name": a["plan_name"],
                 "synced_ago": (max(0, int(time.time() - a["credits_synced_at"]))
                                if a["credits_synced_at"] else None),
-                "gateway_consumed": round(consumed.get(a["id"], 0.0), 4),
+                # 网关记账：请求量 / Token / 积分，按模型拆分
+                "gateway_consumed": st.get("credits", 0.0),
+                "requests": st.get("requests", 0),
+                "errors": st.get("errors", 0),
+                "success_rate": st.get("success_rate"),
+                "tokens": st.get("tokens", 0),
+                "by_model": st.get("by_model", []),
+                "checkin_at": a["checkin_at"] or None,
+                "checkin_ok": bool(a["checkin_ok"]),
+                "checkin_earned": a["checkin_earned"],
+                "checkin_message": a["checkin_message"],
                 "bound_members": bound_map.get(a["id"], []),
             })
         return out
@@ -816,6 +946,12 @@ class Handler(BaseHTTPRequestHandler):
             st = guard.quota_status(store, m)
             keys = store.list_keys(m["id"])
             pref = accounts.get(m["preferred_account_id"] or 0)
+            # 该成员的请求量 / Token / 积分，总盘 + 按模型
+            by_model = store.member_model_summary(m["id"])
+            requests = sum(int(r["n"] or 0) for r in by_model)
+            errors = sum(int(r["err"] or 0) for r in by_model)
+            tokens = sum(int(r["tokens"] or 0) for r in by_model)
+            ok = sum(int(r["ok"] or 0) for r in by_model)
             out.append({
                 "id": m["id"], "name": m["name"], "email": m["email"],
                 "username": m.get("username") or "",
@@ -828,6 +964,20 @@ class Handler(BaseHTTPRequestHandler):
                 "left_today": st["left_today"],
                 "left_week": st["left_week"],
                 "used_total": round(store.credits_total(m["id"]), 4),
+                "requests": requests,
+                "errors": errors,
+                "success_rate": (round(ok * 100.0 / requests, 2) if requests else None),
+                "tokens": tokens,
+                "by_model": [{
+                    "id": r["model"] or "",
+                    "requests": int(r["n"] or 0),
+                    "ok": int(r["ok"] or 0),
+                    "errors": int(r["err"] or 0),
+                    "prompt_tokens": int(r["prompt_tokens"] or 0),
+                    "completion_tokens": int(r["completion_tokens"] or 0),
+                    "tokens": int(r["tokens"] or 0),
+                    "credits": round(float(r["credits"] or 0), 4),
+                } for r in by_model],
                 "model_allowlist": m["model_allowlist"],
                 "note": m["note"],
                 "preferred_account_id": m["preferred_account_id"],
@@ -848,36 +998,66 @@ class Handler(BaseHTTPRequestHandler):
         members = {m["id"]: m["name"] for m in store.list_members()}
         accounts = {a["id"]: (a["name"] or a["email"]) for a in store.list_accounts()}
 
+        def model_name(mid: str) -> str:
+            return (catalog.get(mid) or {}).get("name") or mid or "未知"
+
         per_member = []
         for row in store.member_summary():
             mid = row["member_id"]
+            n = int(row["n"] or 0)
+            ok = int(row["ok"] or 0)
             per_member.append({
+                "id": mid,
                 "name": members.get(mid, "未关联"),
-                "requests": int(row["n"]),
+                "requests": n,
+                "errors": int(row["err"] or 0),
+                "success_rate": round(ok * 100.0 / n, 2) if n else None,
                 "credits": round(float(row["credits"] or 0), 4),
                 "tokens": int(row["tokens"] or 0),
             })
         per_member.sort(key=lambda x: x["credits"], reverse=True)
 
-        # 账号归属：每个账号被消耗多少积分
-        consumed = store.credits_by_account()
-        by_account = [{"name": accounts.get(aid, f"账号 {aid}"),
-                       "credits": round(v, 4)} for aid, v in consumed.items()]
+        # 账号归属：每个账号的积分与请求量
+        by_account = []
+        for aid, st in store.account_summary().items():
+            by_account.append({
+                "id": aid,
+                "name": accounts.get(aid, f"账号 {aid}"),
+                "credits": st["credits"],
+                "requests": st["requests"],
+                "tokens": st["tokens"],
+                "success_rate": st["success_rate"],
+            })
+        by_account.sort(key=lambda x: x["credits"], reverse=True)
 
+        by_model = [{
+            "model": model_name(m["model"]),
+            "id": m["model"] or "",
+            "requests": int(m["n"] or 0),
+            "errors": int(m["err"] or 0),
+            "success_rate": (round(int(m["ok"] or 0) * 100.0 / int(m["n"]), 2)
+                             if int(m["n"] or 0) else None),
+            "prompt_tokens": int(m["prompt_tokens"] or 0),
+            "completion_tokens": int(m["completion_tokens"] or 0),
+            "credits": round(float(m["credits"] or 0), 4),
+            "tokens": int(m["tokens"] or 0),
+        } for m in store.model_summary()]
+
+        all_time = store.usage_totals(0)
         return {
             "daily": store.daily_series(14),
-            "by_model": [{"model": (catalog.get(m["model"]) or {}).get("name")
-                                   or m["model"] or "未知",
-                          "id": m["model"] or "",
-                          "requests": int(m["n"]),
-                          "credits": round(float(m["credits"] or 0), 4),
-                          "tokens": int(m["tokens"] or 0)}
-                         for m in store.model_summary()],
+            "by_model": by_model,
             "by_member": per_member,
             "by_account": by_account,
             "totals": {
-                "requests": sum(d["requests"] for d in store.daily_series(30)),
+                "requests": all_time["requests"],
+                "errors": all_time["errors"],
+                "success_rate": all_time["success_rate"],
+                "tokens": all_time["tokens"],
+                "credits": all_time["credits"],
+                "requests_7d": sum(d["requests"] for d in store.daily_series(7)),
                 "credits_7d": round(sum(m["credits"] for m in per_member), 4),
+                "tokens_7d": sum(m["tokens"] for m in per_member),
             },
         }
 
@@ -886,6 +1066,8 @@ class Handler(BaseHTTPRequestHandler):
         accounts = store.list_accounts()
         members = store.list_members()
         models = all_models() if accounts else {}
+        today = store.usage_totals(day_start())
+        all_time = store.usage_totals(0)
         return {
             "accounts": len(accounts),
             "available": sum(1 for a in accounts
@@ -898,6 +1080,11 @@ class Handler(BaseHTTPRequestHandler):
             "credits_remaining": round(
                 sum(a["credits_remaining"] for a in accounts), 2),
             "credits_total": round(sum(a["credits_total"] for a in accounts), 2),
+            "credits_used": round(sum(a["credits_used"] for a in accounts), 2),
+            # 请求量 / Token / 积分 · 成功率
+            "today": today,
+            "all_time": all_time,
+            "checkin_pending": sum(1 for a in accounts if not a["checkin_at"]),
         }
 
     def _member_dashboard(self, ctx: dict) -> dict:
