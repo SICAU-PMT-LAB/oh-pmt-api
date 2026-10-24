@@ -1,412 +1,265 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>qoder2api · 管理后台</title>
-<style>
-  :root {
-    --paper: #faf9f5;
-    --paper-raised: #f5f3ee;
-    --paper-deep: #efece4;
-    --ink: #1a1915;
-    --ink-soft: #5c5a54;
-    --ink-faint: #8b887f;
-    --rule: #e3e0d6;
-    --rule-strong: #d2cec2;
-    --accent: #c15f3c;
-    --accent-soft: #f5e8e2;
-    --ok: #4a6b52;
-    --warn: #96702f;
-    --err: #a33b2c;
-    --serif: "Tiempos Text", "Copernicus", Charter, "Iowan Old Style",
-             "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC",
-             "Noto Serif CJK SC", serif;
-    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
-  .layout { display: flex; min-height: 100vh; }
-
-  /* ---------- 左侧导航 ---------- */
-  .sidebar {
-    width: 232px; flex: 0 0 232px;
-    background: var(--paper-deep);
-    border-right: 1px solid var(--rule);
-    padding: 34px 0 24px;
-    display: flex; flex-direction: column;
-    position: sticky; top: 0; height: 100vh;
-  }
-  .brand { padding: 0 24px 26px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
-  .brand .kicker {
-    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
-    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
-  }
-  .brand h1 { font-size: 21px; font-weight: 400; margin: 0; letter-spacing: -0.01em; }
-  nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
-  nav a {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 12px; border-radius: 6px;
-    color: var(--ink-soft); text-decoration: none; font-size: 14.5px;
-    transition: background .14s, color .14s;
-  }
-  nav a:hover { background: #e8e4da; color: var(--ink); }
-  nav a.active { background: var(--ink); color: var(--paper); }
-  nav a .ico { width: 15px; text-align: center; opacity: .75; font-size: 13px; }
-  .sidebar-foot {
-    margin-top: auto; padding: 18px 24px 0;
-    border-top: 1px solid var(--rule);
-    font-size: 12px; color: var(--ink-faint); line-height: 1.5;
-  }
-
-  /* ---------- 主区 ---------- */
-  .main { flex: 1; min-width: 0; padding: 40px 48px 80px; }
-  .page { display: none; }
-  .page.active { display: block; animation: fade .2s ease; }
-  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
-
-  .page-head { margin-bottom: 32px; }
-  .page-head h2 { font-size: 29px; font-weight: 400; margin: 0 0 6px; letter-spacing: -0.015em; }
-  .page-head p { margin: 0; color: var(--ink-soft); font-size: 15px; max-width: 660px; }
-
-  h3 {
-    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
-    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
-    margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
-  }
-
-  .stat-row { display: flex; gap: 48px; flex-wrap: wrap; margin-bottom: 36px; }
-  .stat .num { font-size: 34px; font-weight: 400; line-height: 1.05; letter-spacing: -0.02em; }
-  .stat .num small { font-size: 15px; color: var(--ink-faint); margin-left: 3px; }
-  .stat .lbl {
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--ink-faint); margin-top: 6px;
-  }
-
-  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-  th {
-    text-align: left; font-family: var(--mono); font-size: 10px; font-weight: 500;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
-    padding: 0 12px 9px 0; border-bottom: 1px solid var(--rule-strong); white-space: nowrap;
-  }
-  td { padding: 13px 12px 13px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
-  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
-  .empty { color: var(--ink-faint); font-style: italic; padding: 20px 0; }
-
-  .pill {
-    display: inline-block; font-family: var(--mono); font-size: 10.5px;
-    letter-spacing: .05em; padding: 2px 9px; border-radius: 999px;
-    border: 1px solid var(--rule-strong); color: var(--ink-soft); white-space: nowrap;
-  }
-  .pill.ok { color: var(--ok); border-color: #c3d2c6; background: #eef3ef; }
-  .pill.off { color: var(--ink-faint); background: var(--paper-raised); }
-  .pill.err { color: var(--err); border-color: #e0c4bf; background: #f8ece9; }
-  .pill.warn { color: var(--warn); border-color: #ddcfb0; background: #f8f2e6; }
-
-  button {
-    font-family: var(--serif); font-size: 13.5px; padding: 7px 15px;
-    border-radius: 6px; border: 1px solid var(--rule-strong);
-    background: var(--paper); color: var(--ink); cursor: pointer;
-    transition: background .14s, border-color .14s;
-  }
-  button:hover { background: var(--paper-raised); border-color: var(--ink-faint); }
-  button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-  button.primary:hover { background: #000; }
-  button.small { font-size: 11.5px; padding: 3px 9px; }
-  button.ghost { border-color: transparent; background: transparent; color: var(--ink-soft); }
-  button.ghost:hover { background: var(--paper-raised); }
-
-  input, textarea, select {
-    font-family: var(--serif); font-size: 14.5px; padding: 8px 11px;
-    border: 1px solid var(--rule-strong); border-radius: 6px;
-    background: #fff; color: var(--ink); width: 100%;
-  }
-  input:focus, textarea:focus, select:focus {
-    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  input::placeholder { font-size: 13.5px; color: var(--ink-faint); opacity: .72; }
-  label {
-    display: block; font-family: var(--mono); font-size: 10px;
-    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
-    margin-bottom: 5px;
-  }
-  .field { margin-bottom: 16px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 5px; line-height: 1.5; }
-
-  .card {
-    border: 1px solid var(--rule); border-radius: 10px;
-    padding: 24px; background: #fff; margin-bottom: 20px;
-  }
-  .card tight { padding: 0; }
-
-  .keybox {
-    font-family: var(--mono); font-size: 12.5px; background: var(--ink);
-    color: var(--paper); padding: 13px 15px; border-radius: 6px;
-    word-break: break-all; margin-top: 10px;
-  }
-
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .row-actions.tight { gap: 4px; margin-top: 6px; }
-  .row-actions.tight button { padding: 2px 8px; font-size: 11.5px; }
-  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
-  .toolbar .spacer { flex: 1; }
-
-  /* ---------- 图表 ---------- */
-  .chart-wrap { background: #fff; border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; margin-bottom: 20px; }
-  .bars { display: flex; align-items: flex-end; gap: 5px; height: 150px; margin-top: 10px; }
-  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
-  .bar {
-    width: 100%; background: var(--accent); border-radius: 2px 2px 0 0;
-    min-height: 2px; transition: background .14s; position: relative;
-  }
-  .bar:hover { background: #a04d2f; }
-  .bar-lbl { font-family: var(--mono); font-size: 9px; color: var(--ink-faint); white-space: nowrap; }
-  .bar-val { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); }
-
-  .hbar-row { display: grid; grid-template-columns: 190px 1fr 76px; gap: 12px; align-items: center; margin-bottom: 9px; font-size: 13.5px; }
-  .hbar-track { background: var(--paper-raised); border-radius: 3px; height: 20px; overflow: hidden; }
-  .hbar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
-  .hbar-val { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); text-align: right; }
-
-  /* 宽表：账号 / 成员页列多，窄屏横向滚动而不是把数字挤成两行。
-     只在容器真的放不下时才滚动——给 min-width 会让宽屏下也留一条滚动条、
-     把最后一列挤到视线外。 */
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .table-wrap th, .table-wrap td { white-space: nowrap; }
-  .table-wrap:has(> table) { container-type: inline-size; }
-  /* 只有模型明细这类长文本列允许折行 */
-  .table-wrap .wrap, .mini-table td { white-space: normal; }
-  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
-  .bar-track { background: var(--paper-raised); border-radius: 3px; height: 16px; overflow: hidden; }
-  .bar-track > div { height: 100%; background: var(--accent); border-radius: 3px; min-width: 2px; }
-  .ok-pct { font-family: var(--mono); }
-  .checkin-box { border: 1px solid var(--rule); border-left: 3px solid var(--ok);
-    background: #f8faf7; border-radius: 0 8px 8px 0; padding: 12px 16px; margin-bottom: 16px; }
-  .checkin-box .head { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
-    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px; }
-  .checkin-line { font-size: 13.5px; line-height: 1.7; }
-  .checkin-line.ok { color: var(--ink); }
-  .checkin-line.err { color: var(--err); }
-  .checkin-line .sub, td .sub { white-space: normal; overflow: hidden; display: -webkit-box;
-    -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .ok-pct.low { color: var(--err); }
-  .ok-pct.mid { color: var(--warn); }
-  /* 成员 / 账号行的展开明细 */
-  details > summary { cursor: pointer; font-family: var(--mono); font-size: 10.5px;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); margin-top: 6px; }
-  details[open] > summary { margin-bottom: 8px; }
-  .mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  .mini-table th { font-size: 9.5px; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--rule); }
-  .mini-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); }
-  .mini-table td:last-child, .mini-table th:last-child { padding-right: 0; }
-  .mini-table tr:last-child td { border-bottom: none; }
-
-  .progress { background: var(--paper-raised); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 5px; }
-  .chart-wrap .progress { height: 8px; margin-top: 8px; display: block; }
-  .chart-wrap .progress > div { height: 8px; min-width: 2px; }
-  .chart-wrap .hbar-row:last-child { margin-bottom: 0; }
-  .progress > div { height: 100%; background: var(--ok); border-radius: 4px; }
-  .progress.warn > div { background: var(--warn); }
-  .progress.err > div { background: var(--err); }
-
-  .note {
-    border-left: 3px solid var(--accent); background: var(--accent-soft);
-    padding: 12px 16px; font-size: 13.5px; color: var(--ink-soft);
-    border-radius: 0 6px 6px 0; margin: 16px 0;
-  }
-  .note.warn { border-color: var(--warn); background: #f8f3e7; }
-
-  .modal-mask {
-    position: fixed; inset: 0; background: rgba(26,25,21,.32);
-    display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px;
-  }
-  .modal-mask.open { display: flex; }
-  .modal {
-    background: var(--paper); border-radius: 12px; padding: 28px;
-    width: 100%; max-width: 560px; max-height: 86vh; overflow-y: auto;
-  }
-  .modal h3 { margin-bottom: 20px; }
-  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
-
-  @media (max-width: 860px) {
-    .layout { flex-direction: column; }
-    .sidebar { width: 100%; flex: none; height: auto; position: static; padding: 18px 0; }
-    nav { flex-direction: row; overflow-x: auto; padding: 0 14px; }
-    .brand { padding: 0 18px 14px; }
-    .sidebar-foot { display: none; }
-    .main { padding: 26px 20px 60px; }
-    .grid2, .grid3 { grid-template-columns: 1fr; }
-    .hbar-row { grid-template-columns: 110px 1fr 68px; }
-  }
-</style>
+<title>oh-pmt-api · 管理后台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/ui.css">
 </head>
 <body>
 <div class="layout">
 
   <aside class="sidebar">
     <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="12" cy="12" r="8.4" opacity=".45"/>
+          <circle cx="12" cy="12" r="4.6"/>
+          <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
+        </svg>
+        <h1>oh-pmt-api</h1>
+      </div>
       <div class="kicker">管理后台</div>
-      <h1>qoder2api</h1>
     </div>
-    <nav>
+    <nav id="nav">
       <a href="#overview" data-page="overview" class="active"><span class="ico">◈</span>概览</a>
-      <a href="#members" data-page="members"><span class="ico">◉</span>成员</a>
       <a href="#accounts" data-page="accounts"><span class="ico">◇</span>账号</a>
+      <a href="#members" data-page="members"><span class="ico">◉</span>成员</a>
       <a href="#analytics" data-page="analytics"><span class="ico">▤</span>数据</a>
-      <a href="#settings" data-page="settings"><span class="ico">⚙</span>接入</a>
+      <a href="#settings" data-page="settings"><span class="ico">⌘</span>接入</a>
     </nav>
     <div class="sidebar-foot">
-      成员控制台<br>
-      <span class="mono">/console?key=…</span>
+      <div class="theme-toggle" title="切换明暗">
+        <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
+        <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
+      </div>
+      <div style="margin-top:12px">成员控制台 <span class="mono">/me</span></div>
     </div>
   </aside>
 
   <main class="main">
 
-    <!-- 概览 -->
+    <!-- ═══════════ 概览 ═══════════ -->
     <section class="page active" id="page-overview">
       <div class="page-head">
-        <h2>概览</h2>
-        <p>账号积分余量、请求量与成功率、成员用量和近期调用情况。</p>
+        <div>
+          <div class="eyebrow">Overview</div>
+          <h2>概览</h2>
+          <p>各家账号的额度余量、请求成功率与今天的消耗。</p>
+        </div>
+        <button class="ghost small" onclick="reloadOverview(this)">刷新</button>
       </div>
-      <div class="stat-row" id="ov-stats"></div>
-      <div class="chart-wrap">
-        <h3>请求明细 · 累计</h3>
-        <div id="ov-traffic"></div>
+
+      <div class="kpi-grid" id="ov-kpi"></div>
+      <div style="height:18px"></div>
+
+      <div class="grid-wide-left">
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="t">近 14 天 · 请求与积分</span>
+            <span class="spacer"></span>
+            <div class="chart-legend">
+              <span class="li"><span class="sw" style="background:var(--gold)"></span>请求</span>
+              <span class="li"><span class="sw" style="background:var(--bronze)"></span>积分</span>
+            </div>
+          </div>
+          <div id="ov-trend"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">额度余量</span></div>
+          <div id="ov-ring" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"></div>
+        </div>
       </div>
-      <div class="chart-wrap">
-        <h3>近 14 天请求量</h3>
-        <div class="bars" id="ov-chart"></div>
-      </div>
-      <div class="chart-wrap">
-        <h3>各模型请求量与消耗</h3>
-        <div class="table-wrap"><table id="ov-models"></table></div>
-      </div>
+
       <div class="grid2">
-        <div class="chart-wrap">
-          <h3>按成员消耗</h3>
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">按厂商消耗 · 近 7 天</span></div>
+          <div id="ov-provider"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">成员用量 · 今日</span></div>
           <div id="ov-members"></div>
         </div>
-        <div class="chart-wrap">
-          <h3>成员额度使用</h3>
-          <div id="ov-limits"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">模型请求量 · 累计</span>
+          <span class="spacer"></span>
+          <span class="s" id="ov-model-note"></span>
         </div>
-      </div>
-      <div class="chart-wrap">
-        <h3>账号积分余量</h3>
-        <div id="ov-accounts"></div>
+        <div class="table-wrap"><table id="ov-models"></table></div>
       </div>
     </section>
 
-    <!-- 成员 -->
-    <section class="page" id="page-members">
-      <div class="page-head">
-        <h2>成员</h2>
-        <p>为每个成员设定积分上限、优先使用的账号和可用模型。每人一行，展开可以看该成员按模型拆分的请求量、Token 和积分。</p>
-      </div>
-      <div class="toolbar">
-        <button class="primary" onclick="openMemberModal()">新增成员</button>
-        <div class="spacer"></div>
-        <button class="ghost" onclick="loadMembers()">刷新</button>
-      </div>
-      <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>成员 / 账号</th><th>今日 / 上限</th><th>本周 / 上限</th>
-          <th>请求 / 成功率</th><th>Token</th><th>积分</th>
-          <th>密钥</th><th>状态 / 操作</th>
-        </tr></thead>
-        <tbody id="member-body"></tbody>
-      </table>
-      </div>
-    </section>
-
-    <!-- 账号 -->
+    <!-- ═══════════ 账号 ═══════════ -->
     <section class="page" id="page-accounts">
       <div class="page-head">
-        <h2>账号</h2>
-        <p>读取 Qoder 账号的全部额度（套餐内、赠送与签到、共享池），签到领取每日积分，并查看每个账号被网关消耗了多少。</p>
+        <div>
+          <div class="eyebrow">Accounts</div>
+          <h2>账号</h2>
+          <p>按来源厂商分组。点开一张卡片查看该厂商下的账号，再点账号进入详情。</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="primary" onclick="openAccountModal()">接入账号</button>
+          <button onclick="checkinAll(this)">一键签到</button>
+          <button class="ghost" onclick="syncAll(this)">同步额度</button>
+        </div>
       </div>
-      <div class="toolbar">
-        <button class="primary" onclick="openAccountModal()">接入账号</button>
-        <button onclick="checkinAll(this)">一键签到</button>
-        <button onclick="syncAll()">同步额度</button>
-        <div class="spacer"></div>
-        <span class="hint" id="checkin-hint"></span>
-        <button class="ghost" onclick="loadAccounts()">刷新</button>
-      </div>
+
       <div id="checkin-result"></div>
-      <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>账号</th><th>额度（全部）</th><th>额度构成</th><th>签到</th>
-          <th>请求 / 成功率</th><th>Token</th><th>积分消耗</th><th>状态 / 操作</th>
-        </tr></thead>
-        <tbody id="account-body"></tbody>
-      </table>
+      <div class="provider-grid" id="provider-grid"></div>
+
+      <div id="vendor-panel" style="display:none;margin-top:26px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <button class="ghost small" onclick="closeVendor()">← 全部厂商</button>
+          <h3 class="section" style="margin:0;border:none;padding:0" id="vendor-title"></h3>
+          <span class="spacer" style="flex:1"></span>
+          <span class="hint" id="vendor-hint"></span>
+        </div>
+        <div id="vendor-accounts"></div>
       </div>
     </section>
 
-    <!-- 数据 -->
+    <!-- ═══════════ 成员 ═══════════ -->
+    <section class="page" id="page-members">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Members</div>
+          <h2>成员</h2>
+          <p>点任意一行直接编辑。可用模型用标签点选，不必记模型 id。</p>
+        </div>
+        <button class="primary" onclick="openMemberModal()">新增成员</button>
+      </div>
+      <div class="table-wrap">
+        <table class="member-table">
+          <thead><tr>
+            <th>成员</th><th>今日 / 上限</th><th>本周 / 上限</th>
+            <th>请求 · 成功率</th><th>Token</th><th>积分</th>
+            <th>可用模型</th><th>操作</th>
+          </tr></thead>
+          <tbody id="member-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══════════ 数据 ═══════════ -->
     <section class="page" id="page-analytics">
       <div class="page-head">
-        <h2>数据</h2>
-        <p>请求量、Token 与积分消耗的分布情况，用于判断额度分配是否合理。</p>
+        <div>
+          <div class="eyebrow">Analytics</div>
+          <h2>数据</h2>
+          <p>请求量、Token 与积分的分布，用来判断额度分配和模型选择。</p>
+        </div>
+        <button class="ghost small" onclick="loadAnalytics(this, true)">刷新</button>
       </div>
-      <div class="stat-row" id="an-stats"></div>
-      <div class="chart-wrap">
-        <h3>近 14 天请求量</h3>
-        <div class="bars" id="an-chart"></div>
+
+      <div class="kpi-grid" id="an-kpi"></div>
+      <div style="height:18px"></div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="t">近 14 天 · 请求量</span>
+          <span class="spacer"></span>
+          <div class="chart-legend">
+            <span class="li"><span class="sw" style="background:var(--gold)"></span>请求</span>
+            <span class="li"><span class="sw" style="background:var(--err)"></span>失败</span>
+          </div>
+        </div>
+        <div id="an-daily"></div>
       </div>
-      <div class="chart-wrap">
-        <h3>按模型</h3>
+
+      <div class="grid2">
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">近 24 小时 · 请求量</span></div>
+          <div id="an-hourly"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">单次请求 Token 分布</span></div>
+          <div id="an-hist"></div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="t">模型用量构成 · 近 14 天</span>
+          <span class="spacer"></span>
+          <div class="chart-legend" id="an-pivot-legend"></div>
+        </div>
+        <div id="an-pivot"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">使用时段 · 星期 × 小时</span>
+          <span class="spacer"></span><span class="s">颜色越深请求越多</span></div>
+        <div id="an-heat"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">按厂商积分</span></div>
+          <div id="an-provider"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><span class="t">按成员积分 · 近 7 天</span></div>
+          <div id="an-members"></div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">按模型明细</span></div>
         <div class="table-wrap"><table id="an-models"></table></div>
       </div>
-      <div class="chart-wrap">
-        <h3>按成员（近 7 天）</h3>
-        <div class="table-wrap"><table id="an-members"></table></div>
-      </div>
-      <div class="chart-wrap">
-        <h3>按账号</h3>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">按账号明细</span></div>
         <div class="table-wrap"><table id="an-accounts"></table></div>
       </div>
     </section>
 
-    <!-- 接入 -->
+    <!-- ═══════════ 接入 ═══════════ -->
     <section class="page" id="page-settings">
       <div class="page-head">
-        <h2>接入</h2>
-        <p>把 API 地址和密钥发给成员，他们就可以在任意 OpenAI 兼容客户端里使用。</p>
+        <div>
+          <div class="eyebrow">Integration</div>
+          <h2>接入</h2>
+          <p>把地址和密钥发给成员，在任意 OpenAI 兼容客户端里填这两项即可。</p>
+        </div>
       </div>
-      <div class="card">
-        <h3>接口地址</h3>
-        <div class="keybox" id="base-url">—</div>
-        <div class="hint">在每个成员的密钥上配置 IP 白名单后，只有允许的来源可以调用。</div>
+
+      <div class="grid-wide-left">
+        <div class="card gold-edge">
+          <h3 class="section">OpenAI 兼容端点</h3>
+          <div class="keybox" id="base-url">—</div>
+          <div class="hint">请求头 <span class="mono">Authorization: Bearer &lt;密钥&gt;</span>，
+            密钥在成员页生成。</div>
+          <h3 class="section" style="margin-top:20px">调用示例</h3>
+          <div class="keybox" id="curl-example" style="white-space:pre-wrap"></div>
+        </div>
+        <div class="card">
+          <h3 class="section">可用模型</h3>
+          <div id="model-list" class="hint">正在读取…</div>
+        </div>
       </div>
-      <div class="card">
-        <h3>可用模型</h3>
-        <div id="model-list" class="hint">正在读取…</div>
-      </div>
-      <div class="card">
-        <h3>最近调用</h3>
-        <table>
-          <thead><tr><th>时间</th><th>成员</th><th>模型</th><th>积分</th><th>Tokens</th><th>结果</th><th>来源</th></tr></thead>
-          <tbody id="recent-body"></tbody>
-        </table>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">最近调用</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>成员</th><th>模型</th><th class="num">积分</th>
+              <th class="num">Token</th><th>结果</th><th>来源</th></tr></thead>
+            <tbody id="recent-body"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
   </main>
 </div>
 
-<!-- 成员弹窗 -->
+<!-- ───────── 成员编辑 ───────── -->
 <div class="modal-mask" id="member-modal">
   <div class="modal">
     <h3 id="member-modal-title">新增成员</h3>
@@ -417,363 +270,473 @@
     </div>
     <div class="grid2">
       <div class="field"><label>登录账号</label><input id="m-username" placeholder="zhangsan"></div>
-      <div class="field"><label>登录密码</label><input id="m-password" placeholder="不填则不修改"></div>
+      <div class="field"><label>登录密码</label><input id="m-password" type="password" placeholder="不填则不修改"></div>
     </div>
     <div class="grid2">
       <div class="field"><label>每日积分上限</label><input id="m-daily" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
       <div class="field"><label>每周积分上限</label><input id="m-weekly" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
     </div>
     <div class="field">
-      <label>优先使用的账号</label>
-      <select id="m-account"><option value="">不指定，共用账号池</option></select>
-      <div class="hint">指定后优先用这个账号的积分；该账号不可用时自动回退到其他账号。</div>
+      <label>优先账号（软绑定，超额会回退到账号池）</label>
+      <select id="m-account"></select>
     </div>
     <div class="field">
-      <label>可用模型（逗号分隔）</label>
-      <input id="m-models" placeholder="qfmodel,gfmodel,dfmodel">
-      <div class="hint">留空表示全部模型。默认只开放三个 Flash 档。</div>
+      <label>可用模型 · 点选</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="chip" data-preset="all">全选</button>
+        <button class="chip" data-preset="flash">仅 Flash 档</button>
+        <button class="chip" data-preset="none">清空（不限）</button>
+      </div>
+      <div class="chip-picker" id="m-models"></div>
+      <div class="hint" id="m-models-hint">一个都不选表示不限制模型。</div>
     </div>
     <div class="field"><label>备注</label><input id="m-note" placeholder="可选"></div>
     <div class="modal-actions">
       <button onclick="closeModal('member-modal')">取消</button>
-      <button class="primary" onclick="saveMember()">保存</button>
+      <button class="primary" onclick="saveMember(this)">保存</button>
     </div>
   </div>
 </div>
 
-<!-- 账号弹窗 -->
+<!-- ───────── 接入账号 ───────── -->
 <div class="modal-mask" id="account-modal">
   <div class="modal">
-    <h3>接入 Qoder 账号</h3>
+    <h3>接入账号</h3>
     <div class="field">
-      <label>Personal Access Token</label>
-      <input id="a-pat" type="password" placeholder="pt-...">
-      <div class="hint">在 Qoder 的 Integrations 页面创建。令牌会被本地保存用于自动续期。</div>
+      <label>来源厂商</label>
+      <div class="chip-picker" id="a-providers" style="max-height:none"></div>
     </div>
-    <div class="field">
+    <div class="field" id="a-region-field">
       <label>区域</label>
-      <select id="a-region">
-        <option value="global">国际版 · qoder.com</option>
-        <option value="cn">国内版 · qoder.com.cn</option>
-      </select>
+      <select id="a-region"></select>
     </div>
+    <div class="field">
+      <label id="a-cred-label">凭证</label>
+      <input id="a-cred" type="password" placeholder="pt-...">
+      <div class="hint" id="a-cred-hint"></div>
+    </div>
+    <div class="note" id="a-provider-note" style="display:none"></div>
     <div class="modal-actions">
       <button onclick="closeModal('account-modal')">取消</button>
-      <button class="primary" onclick="addAccount()">校验并接入</button>
+      <button class="primary" onclick="addAccount(this)">校验并接入</button>
     </div>
   </div>
 </div>
 
-<!-- 密钥弹窗 -->
+<!-- ───────── 生成密钥 ───────── -->
 <div class="modal-mask" id="key-modal">
   <div class="modal">
     <h3>生成密钥</h3>
     <input type="hidden" id="k-member">
     <div class="field"><label>所属成员</label><div id="k-member-name" class="mono"></div></div>
     <div class="field">
-      <label>允许的 IP / 网段</label>
+      <label>IP 白名单（可空）</label>
       <input id="k-ip" placeholder="例如 10.0.0.0/8, 203.0.113.7">
-      <div class="hint">留空不限制。建议填写，防止密钥外泄后被别人用。</div>
     </div>
     <div class="field"><label>备注</label><input id="k-note" placeholder="可选"></div>
     <div id="k-result"></div>
     <div class="modal-actions">
       <button onclick="closeModal('key-modal')">关闭</button>
-      <button class="primary" onclick="createKey()">生成</button>
+      <button class="primary" onclick="createKey(this)">生成</button>
     </div>
   </div>
 </div>
 
-<script>
-const TOKEN = new URLSearchParams(location.search).get('token')
-           || localStorage.getItem('q2a_admin') || '';
-if (TOKEN) localStorage.setItem('q2a_admin', TOKEN);
+<script type="module">
+import {
+  initTheme, api, toast, esc, fmtInt, fmtCompact,
+  lineChart, barChart, stackedArea, ringChart, hbarList,
+  histogram, heatmap, sparkline, countUp,
+} from '/assets/charts.js';
 
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const num = (n, d = 2) => Number(n || 0).toFixed(d);
-const int = n => (n || 0).toLocaleString('en-US');
+initTheme();
 
-let MEMBERS = [], ACCOUNTS = [], MODELS = {};
-let MODEL_NAMES = {};   // id -> 完整名称
+let STATUS = null, ACCOUNTS = [], MEMBERS = [], MODELS = [], PROVIDERS = [];
+let ANALYSIS = null, OPEN_VENDOR = null;
+const modelById = id => MODELS.find(m => m.id === id) || { id, name: id, provider: 'qoder' };
+const provColor = slug => (PROVIDERS.find(p => p.slug === slug) || {}).color || 'var(--gold)';
+const provLabel = slug => (PROVIDERS.find(p => p.slug === slug) || {}).label || slug;
 
-function modelLabel(id) {
-  return MODEL_NAMES[id] || id || '未知';
-}
-
-async function api(path, opts = {}) {
-  // 凭证走浏览器 Cookie（HttpOnly），不再从地址栏取令牌
-  const res = await fetch(path, {
-    ...opts,
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-  });
-  if (res.status === 401 || res.status === 403) {
-    const text = await res.clone().text();
-    if (text.includes('admin_denied') || text.includes('admin_locked')) {
-      location.href = '/login';
-      throw new Error('登录已过期');
-    }
-  }
-  const text = await res.text();
-  let data = {};
-  try { data = JSON.parse(text); } catch { data = { error: { message: text } }; }
-  if (!res.ok) throw new Error((data.error && data.error.message) || '请求失败');
-  return data;
-}
-
-/* ---------------- 导航 ---------------- */
+/* ───────── 导航 ───────── */
 function show(page) {
-  document.querySelectorAll('nav a').forEach(a =>
+  document.querySelectorAll('#nav a').forEach(a =>
     a.classList.toggle('active', a.dataset.page === page));
   document.querySelectorAll('.page').forEach(p =>
     p.classList.toggle('active', p.id === 'page-' + page));
+  location.hash = page;
   if (page === 'analytics') loadAnalytics();
   if (page === 'settings') loadSettings();
+  if (page === 'accounts') loadAccounts();
 }
-document.querySelectorAll('nav a').forEach(a => {
-  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); });
-});
-// 地址栏 hash 直达某一页，刷新后停在同一页
-window.addEventListener('hashchange', () => {
-  const page = location.hash.replace('#', '');
-  if (page && document.getElementById('page-' + page)) show(page);
-});
+document.querySelectorAll('#nav a').forEach(a =>
+  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); }));
 
-document.addEventListener('click', e => {
-  const btn = e.target.closest('.copy-btn');
-  if (btn) copyText(btn.dataset.key, btn);
-});
+window.openModal = id => document.getElementById(id).classList.add('open');
+window.closeModal = id => document.getElementById(id).classList.remove('open');
+document.querySelectorAll('.modal-mask').forEach(m =>
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); }));
 
-function copyText(text, btn) {
-  const done = () => {
-    const old = btn.textContent;
-    btn.textContent = '已复制';
-    setTimeout(() => { btn.textContent = old; }, 1400);
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
-  } else fallback(text, done);
-}
-function fallback(text, done) {
-  const ta = document.createElement('textarea');
-  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); done(); } catch { alert(text); }
-  document.body.removeChild(ta);
-}
-
-function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-document.querySelectorAll('.modal-mask').forEach(m => {
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
-});
-
-/* ---------------- 图表 ---------------- */
-function renderBars(el, data, valueKey, fmtVal) {
-  const max = Math.max(...data.map(d => d[valueKey]), 0.0001);
-  el.innerHTML = data.map(d => {
-    const h = Math.max(2, (d[valueKey] / max) * 130);
-    const label = fmtVal ? fmtVal(d[valueKey]) : d[valueKey];
-    return `<div class="bar-col" title="${esc(d.date)}：${esc(label)}">
-      <div class="bar-val">${d[valueKey] > 0 ? esc(label) : ''}</div>
-      <div class="bar" style="height:${h}px"></div>
-      <div class="bar-lbl">${esc(d.date)}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderHBars(el, rows, nameKey, valueKey, empty) {
-  if (!rows.length) { el.innerHTML = `<div class="empty">${empty || '暂无数据'}</div>`; return; }
-  const max = Math.max(...rows.map(r => r[valueKey]), 0.0001);
-  el.innerHTML = rows.map(r => `
-    <div class="hbar-row">
-      <div>${esc(r[nameKey])}</div>
-      <div class="hbar-track"><div class="hbar-fill" style="width:${(r[valueKey] / max) * 100}%"></div></div>
-      <div class="hbar-val">${num(r[valueKey], 3)}</div>
-    </div>`).join('');
-}
-
-/* 成功率：无请求时显示 —，低成功率按阈值上色 */
-function pctLabel(rate) {
-  if (rate === null || rate === undefined) return '<span class="hint">—</span>';
-  const cls = rate >= 95 ? '' : rate >= 80 ? ' mid' : ' low';
-  return `<span class="ok-pct${cls}">${num(rate, 1)}%</span>`;
-}
-
-/* 通用多列表格：列定义 {k,label,cls,fmt}，fmt(row) 返回 HTML */
-function renderTable(el, rows, cols, empty) {
-  if (!rows.length) { el.innerHTML = `<tbody><tr><td class="empty">${empty || '暂无数据'}</td></tr></tbody>`; return; }
-  el.innerHTML = `<thead><tr>${cols.map(c =>
-      `<th class="${c.cls || ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map(r => `<tr>${cols.map(c =>
-      `<td class="${c.cls || ''}">${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody>`;
-}
-
-/* 模型名：有显示名就显示，没有则回退到上游 key */
-function modelCell(id, name) {
-  const label = name || modelLabel(id);
-  return `${esc(label)}${label !== id && id ? `<div class="sub">${esc(id)}</div>` : ''}`;
-}
-
-/* 按模型明细：整行展开，避免嵌在单元格里把列宽撑坏 */
-function modelBreakdown(byModel) {
-  if (!byModel || !byModel.length) return '<div class="hint">没有调用记录</div>';
-  const rows = byModel.map(m => `
-    <tr>
-      <td>${modelCell(m.id, m.name)}</td>
-      <td class="num">${int(m.requests)}</td>
-      <td class="num">${int(m.errors)}</td>
-      <td class="num">${pctLabel(m.requests ? (m.ok / m.requests) * 100 : null)}</td>
-      <td class="num">${int(m.prompt_tokens || 0)}</td>
-      <td class="num">${int(m.completion_tokens || 0)}</td>
-      <td class="num">${int(m.tokens)}</td>
-      <td class="num">${num(m.credits, 4)}</td>
-    </tr>`).join('');
-  return `<table class="mini-table">
-    <thead><tr><th>模型</th><th class="num">请求</th><th class="num">失败</th>
-      <th class="num">成功率</th><th class="num">输入 Token</th>
-      <th class="num">输出 Token</th><th class="num">Token 合计</th>
-      <th class="num">积分</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
-}
-
-/* 密钥：默认只显示前 14 位，避免把整条密钥撑开整列 */
-function shortKey(value, prefix) {
-  const v = value || '';
-  if (!v) return (prefix || '') + '…（旧密钥无明文）';
-  return v.length > 16 ? v.slice(0, 16) + '…' : v;
-}
-
-function revealKey(id, btn) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const full = el.dataset.full || '';
-  const short = el.dataset.short || '';
-  if (full) {                      // 当前是展开态，收起
-    el.textContent = short;
-    el.dataset.full = '';
-    btn.textContent = '查看';
-    return;
-  }
-  // 首次展开：从相邻的复制按钮拿全串，避免额外请求
-  const copyBtn = btn.parentElement.querySelector('.copy-btn');
-  if (!copyBtn) return;
-  el.dataset.short = el.textContent;
-  el.dataset.full = copyBtn.dataset.key;
-  el.textContent = copyBtn.dataset.key;
-  btn.textContent = '收起';
-}
-
-/* 明细行开关：点「按模型」在原行下面展开一行 colspan */
-function toggleDetail(btn) {
-  const row = document.getElementById(btn.dataset.detail);
-  if (!row) return;
-  const open = row.style.display !== 'none';
-  row.style.display = open ? 'none' : '';
-  btn.textContent = open ? '按模型 ▾' : '收起 ▴';
-}
-
-/* ---------------- 概览 ---------------- */
-let ANALYTICS = null;
-
+/* ───────── 概览 ───────── */
 async function loadOverview() {
   try {
-    const s = await api('/api/status');
-    MODEL_NAMES = {};
-    (s.models || []).forEach(m => { MODEL_NAMES[m.id] = m.name; });
-    const pct = s.credits_total > 0 ? (s.credits_remaining / s.credits_total) * 100 : 0;
-    const t = s.today || {}, a = s.all_time || {};
-    document.getElementById('ov-stats').innerHTML = `
-      <div class="stat"><div class="num">${num(s.credits_remaining, 1)}<small>积分</small></div>
-        <div class="lbl">账号额度余量</div>
-        <div class="progress" style="width:150px"><div style="width:${pct}%"></div></div></div>
-      <div class="stat"><div class="num">${pctLabel(a.success_rate)}</div>
-        <div class="lbl">请求成功率（累计 ${int(a.requests)} 次）</div></div>
-      <div class="stat"><div class="num">${int(t.requests)}</div>
-        <div class="lbl">今日请求 · 成功 ${pctLabel(t.success_rate)}</div></div>
-      <div class="stat"><div class="num">${int(t.tokens)}</div>
-        <div class="lbl">今日 Token · 消耗 ${num(t.credits, 3)} 积分</div></div>
-      <div class="stat"><div class="num">${s.available}<small>/${s.accounts}</small></div><div class="lbl">可用账号</div></div>
-      <div class="stat"><div class="num">${s.members}</div><div class="lbl">成员 · ${s.keys} 个密钥</div></div>`;
+    STATUS = await api('/api/status');
+    MODELS = STATUS.models || [];
+    PROVIDERS = STATUS.providers || [];
+    const stats = STATUS.provider_stats || [];
+    const t = STATUS.today || {}, a = STATUS.all_time || {};
 
-    document.getElementById('ov-traffic').innerHTML = `
-      <div class="stat-row" style="margin-bottom:0">
-        <div class="stat"><div class="num">${int(a.requests)}</div><div class="lbl">累计请求</div></div>
-        <div class="stat"><div class="num">${int(a.ok)}</div><div class="lbl">成功</div></div>
-        <div class="stat"><div class="num">${int(a.errors)}</div><div class="lbl">失败</div></div>
-        <div class="stat"><div class="num">${pctLabel(a.success_rate)}</div><div class="lbl">成功率</div></div>
-        <div class="stat"><div class="num">${int(a.prompt_tokens)}</div><div class="lbl">输入 Token</div></div>
-        <div class="stat"><div class="num">${int(a.completion_tokens)}</div><div class="lbl">输出 Token</div></div>
-        <div class="stat"><div class="num">${int(a.tokens)}</div><div class="lbl">Token 合计</div></div>
-        <div class="stat"><div class="num">${num(a.credits, 2)}<small>积分</small></div><div class="lbl">积分消耗</div></div>
+    const kid = (k, v, d = '', spark = '') => `
+      <div class="kpi">
+        <div class="k">${esc(k)}</div>
+        <div class="v">${v}</div>
+        ${d ? `<div class="d">${d}</div>` : ''}
+        ${spark}
       </div>`;
+
+    document.getElementById('ov-kpi').innerHTML =
+      kid('账号额度余量',
+          `<span data-count="${STATUS.credits_remaining}" data-dec="1">0</span><small>积分</small>`,
+          `总额 ${fmtCompact(STATUS.credits_total)} · 已用 ${fmtCompact(STATUS.credits_used)}`) +
+      kid('可用账号', `<span data-count="${STATUS.available}" data-dec="0">0</span><small>/ ${STATUS.accounts}</small>`,
+          `${stats.filter(s => s.accounts > 0).length} 家厂商在跑`) +
+      kid('成员', `<span data-count="${STATUS.members}" data-dec="0">0</span><small>人</small>`,
+          `${STATUS.keys} 个密钥`) +
+      kid('今日请求', `<span data-count="${t.requests || 0}" data-dec="0">0</span>`,
+          `消耗 ${fmtCompact(t.credits || 0)} 积分`) +
+      kid('今日 Token', `<span data-count="${t.tokens || 0}" data-dec="0">0</span>`,
+          `成功率 ${t.success_rate == null ? '—' : t.success_rate.toFixed(1) + '%'}`) +
+      kid('累计请求', `<span data-count="${a.requests || 0}" data-dec="0">0</span>`,
+          `失败 ${fmtInt(a.errors || 0)} 次`);
+    document.querySelectorAll('#ov-kpi [data-count]').forEach(n =>
+      countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
+
+    // 额度环形
+    const pct = STATUS.credits_total > 0
+      ? STATUS.credits_remaining / STATUS.credits_total : 0;
+    const ringWrap = document.getElementById('ov-ring');
+    ringWrap.innerHTML = `<div id="ring-slot"></div>
+      <div style="flex:1;min-width:150px">
+        <div class="stat"><div class="num-big">${fmtCompact(STATUS.credits_remaining)}<small>积分</small></div>
+          <div class="lbl">全部账号剩余</div></div>
+        <div class="hint" style="margin-top:10px">已用 ${fmtCompact(STATUS.credits_used)} /
+          总额 ${fmtCompact(STATUS.credits_total)}</div>
+      </div>`;
+    ringChart(document.getElementById('ring-slot'),
+      { value: STATUS.credits_remaining, total: STATUS.credits_total || 1, size: 120, label: 'REMAINING' });
   } catch (e) {
-    document.getElementById('ov-stats').innerHTML =
-      `<div class="empty">${esc(e.message)}</div>`;
+    document.getElementById('ov-kpi').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
+
   try {
     const a = await api('/api/analytics');
-    ANALYTICS = a;
-    renderBars(document.getElementById('ov-chart'), a.daily, 'requests', v => int(v));
+    ANALYSIS = a;
+    lineChart(document.getElementById('ov-trend'), {
+      labels: a.daily.map(d => d.date),
+      series: [
+        { name: '请求', color: 'var(--gold)', values: a.daily.map(d => d.requests) },
+        { name: '积分', color: 'var(--bronze)', values: a.daily.map(d => d.credits) },
+      ],
+      area: true, height: 210, yFmt: fmtCompact,
+    });
+    hbarList(document.getElementById('ov-provider'), {
+      rows: (a.by_provider || []).map(p => ({
+        label: p.label, value: p.credits, color: p.color,
+      })),
+      fmt: v => v.toFixed(3), unit: ' 积分',
+    });
+    document.getElementById('ov-members').innerHTML = '';
+    const memberRows = (a.by_member || []).slice(0, 6).map(m => ({
+      label: m.name, value: m.credits, color: 'var(--gold)',
+    }));
+    hbarList(document.getElementById('ov-members'), {
+      rows: memberRows, fmt: v => v.toFixed(3), unit: ' 积分',
+    });
     renderTable(document.getElementById('ov-models'), a.by_model, [
       { label: '模型', fmt: r => modelCell(r.id, r.model) },
-      { label: '请求量', cls: 'num', fmt: r => int(r.requests) },
-      { label: '失败', cls: 'num', fmt: r => int(r.errors) },
-      { label: '成功率', cls: 'num', fmt: r => pctLabel(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r =>
-          `${int(r.tokens)}<div class="sub">入 ${int(r.prompt_tokens)} · 出 ${int(r.completion_tokens)}</div>` },
-      { label: '积分', cls: 'num', fmt: r => num(r.credits, 4) },
-    ], '还没有调用');
-    renderHBars(document.getElementById('ov-members'), a.by_member.slice(0, 6), 'name', 'credits', '还没有调用');
-  } catch { /* 忽略图表错误 */ }
-  renderAccountCredits();
+      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
+      { label: '失败', cls: 'num', fmt: r => fmtInt(r.errors) },
+      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
+      { label: 'Token', cls: 'num', fmt: r => fmtInt(r.tokens) },
+      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
+    ], '还没有调用记录');
+    document.getElementById('ov-model-note').textContent =
+      `共 ${(a.by_model || []).length} 个模型被调用过`;
+  } catch { /* 图表失败不影响指标 */ }
+}
+window.reloadOverview = async (btn) => {
+  btn.disabled = true;
+  await loadOverview();
+  btn.disabled = false;
+  toast('已刷新');
+};
+
+/* ───────── 账号 ───────── */
+async function loadAccounts() {
+  try {
+    const d = await api('/api/accounts');
+    ACCOUNTS = d.accounts || [];
+    PROVIDERS = d.providers || PROVIDERS;
+    try { STATUS = await api('/api/status'); } catch { /* 概览失败不阻塞 */ }
+    renderProviderCards();
+    if (OPEN_VENDOR) renderVendor(OPEN_VENDOR);
+  } catch (e) {
+    document.getElementById('provider-grid').innerHTML =
+      `<div class="empty">${esc(e.message)}</div>`;
+  }
 }
 
-function renderAccountCredits() {
-  const el = document.getElementById('ov-accounts');
-  if (!ACCOUNTS.length) { el.innerHTML = '<div class="empty">还没有接入账号</div>'; return; }
-  el.innerHTML = ACCOUNTS.map(a => {
-    const pct = a.credits_total > 0 ? Math.min(100, (a.credits_remaining / a.credits_total) * 100) : 0;
-    const cls = pct <= 10 ? 'progress err' : pct <= 30 ? 'progress warn' : 'progress';
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;font-size:13.5px;gap:12px">
-        <span>${esc(a.name || a.email)}</span>
-        <span class="mono">${num(a.credits_remaining, 1)} / ${num(a.credits_total, 0)}
-          <span class="sub">· 已用 ${num(a.credits_used, 1)}${a.credits_addon_total > 0 ? ` · 赠送 ${num(a.credits_addon_remaining, 0)}/${num(a.credits_addon_total, 0)}` : ''}</span></span>
+function renderProviderCards() {
+  const stats = (STATUS && STATUS.provider_stats) || [];
+  const grid = document.getElementById('provider-grid');
+  grid.innerHTML = (PROVIDERS.length ? PROVIDERS : stats).map(p => {
+    const st = stats.find(s => s.slug === p.slug) || {
+      accounts: 0, available_accounts: 0, credits_total: 0, credits_remaining: 0, credits_used: 0 };
+    const pending = !p.available;
+    const usedPct = st.credits_total > 0
+      ? Math.min(100, (st.credits_used / st.credits_total) * 100) : 0;
+    return `<div class="provider-card ${pending ? 'pending' : ''}" style="--prov-color:${p.color}"
+        data-slug="${p.slug}" role="button" tabindex="0">
+      <div class="pc-head">
+        <div class="pc-glyph">${esc(p.label.slice(0, 1))}</div>
+        <div style="flex:1">
+          <div class="pc-name">${esc(p.label)}</div>
+          <div class="pc-sub">${pending ? '待接入'
+            : `${st.accounts} 个账号 · ${st.available_accounts} 可用`}</div>
+        </div>
+        ${pending ? '<span class="pill off">未接入</span>'
+                  : `<span class="pill ok"><span class="dot"></span>${st.available_accounts}</span>`}
       </div>
-      <div class="${cls}"><div style="width:${pct}%"></div></div>
+      <div class="pc-nums">
+        <div><div class="pc-num">${fmtCompact(st.credits_remaining)}<small>积分</small></div>
+          <div class="pc-lbl">剩余</div></div>
+        <div><div class="pc-num">${st.accounts}</div><div class="pc-lbl">账号</div></div>
+      </div>
+      <div class="progress ${usedPct > 92 ? 'err' : usedPct > 70 ? 'warn' : ''}">
+        <div data-w="${usedPct.toFixed(1)}"></div>
+      </div>
+      <div class="pc-foot">
+        <span class="pc-lbl">已用 ${fmtCompact(st.credits_used)} / ${fmtCompact(st.credits_total)}</span>
+        <span class="pc-go">${pending ? '查看接入说明 →' : '查看账号 →'}</span>
+      </div>
     </div>`;
   }).join('');
+  requestAnimationFrame(() => grid.querySelectorAll('.progress > div[data-w]')
+    .forEach(d => { d.style.width = d.dataset.w + '%'; }));
+
+  grid.querySelectorAll('.provider-card').forEach(card => {
+    const go = () => openVendor(card.dataset.slug);
+    card.addEventListener('click', go);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  });
 }
 
-function renderMemberLimits() {
-  const el = document.getElementById('ov-limits');
-  if (!MEMBERS.length) { el.innerHTML = '<div class="empty">还没有成员</div>'; return; }
-  el.innerHTML = MEMBERS.slice(0, 6).map(m => {
-    if (!m.limit_daily) {
-      return `<div style="display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:12px">
-        <span>${esc(m.name)}</span><span class="mono">今日 ${num(m.used_today)}（不限）</span></div>`;
-    }
-    const pct = Math.min(100, (m.used_today / m.limit_daily) * 100);
-    const cls = pct >= 95 ? 'progress err' : pct >= 70 ? 'progress warn' : 'progress';
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;font-size:13.5px">
-        <span>${esc(m.name)}</span>
-        <span class="mono">${num(m.used_today)} / ${num(m.limit_daily)}</span>
+function openVendor(slug) {
+  OPEN_VENDOR = slug;
+  renderVendor(slug);
+  document.getElementById('vendor-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+window.closeVendor = () => {
+  OPEN_VENDOR = null;
+  document.getElementById('vendor-panel').style.display = 'none';
+};
+
+function renderVendor(slug) {
+  const prov = PROVIDERS.find(p => p.slug === slug) || { label: slug, color: 'var(--gold)' };
+  const rows = ACCOUNTS.filter(a => a.provider === slug);
+  const panel = document.getElementById('vendor-panel');
+  panel.style.display = '';
+  document.getElementById('vendor-title').innerHTML =
+    `<span style="color:${prov.color}">${esc(prov.label)}</span> · ${rows.length} 个账号`;
+  const pending = rows.length === 0 && !prov.available;
+  const pendingCheckin = rows.filter(a => a.supports_checkin && !a.checkin_at).length;
+  document.getElementById('vendor-hint').textContent = pending
+    ? '这一家的协议还没接入，接入后这里会出现账号列表'
+    : pendingCheckin ? `${pendingCheckin} 个账号今天还没签到`
+    : rows.length ? '' : '还没有账号，点右上角「接入账号」添加';
+
+  if (!rows.length) {
+    document.getElementById('vendor-accounts').innerHTML = `<div class="card">
+      <div class="empty">${esc(prov.label)} 还没有账号</div>
+      ${!prov.available ? `<div class="note">${esc(prov.label)} 的适配器还没有实现。
+        账号表、接口和界面都已经按厂商分开，补上 <span class="mono">src/providers.py</span>
+        里对应的适配器就能接入。</div>` : ''}
+    </div>`;
+    return;
+  }
+
+  document.getElementById('vendor-accounts').innerHTML = rows.map(a => {
+    const pct = a.credits_total > 0
+      ? Math.min(100, (a.credits_remaining / a.credits_total) * 100) : 0;
+    const state = !a.enabled ? '<span class="pill off">停用</span>'
+      : a.cooldown > 0 ? `<span class="pill warn">冷却 ${a.cooldown}s</span>`
+      : '<span class="pill ok"><span class="dot"></span>可用</span>';
+    const expire = a.credits_expire_at
+      ? new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN') : '不过期';
+    return `<div class="account-row" style="grid-template-columns:1.5fr 1.1fr 1fr auto">
+      <div>
+        <div class="an">${esc(a.name || a.email || a.uid)}</div>
+        <div class="as">${esc(a.email)} · ${esc(a.region_label)}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
+        <div class="as">${a.bound_members.length ? '绑定 ' + a.bound_members.map(esc).join('、') : '未绑定成员'}</div>
       </div>
-      <div class="${cls}"><div style="width:${pct}%"></div></div>
+      <div>
+        <div class="mono" style="font-size:12px">${a.credits_remaining.toFixed(1)}
+          <span style="color:var(--ink-faint)">/ ${a.credits_total.toFixed(0)}</span></div>
+        <div class="progress ${pct <= 10 ? 'err' : pct <= 30 ? 'warn' : ''}" style="margin-top:5px">
+          <div data-w="${pct.toFixed(1)}"></div>
+        </div>
+        <div class="as" style="margin-top:5px">已用 ${a.credits_used.toFixed(1)} · ${expire}</div>
+      </div>
+      <div>
+        <div style="font-size:12.5px">${fmtInt(a.requests)} 次 · ${pctCell(a.success_rate)}</div>
+        <div class="as">${fmtCompact(a.tokens)} Token · ${a.gateway_consumed.toFixed(3)} 积分</div>
+        ${a.supports_checkin ? `<div class="as">${
+          a.checkin_at ? '签到 ' + (a.checkin_ok ? '✓ ' + esc(a.checkin_message || '已签到')
+            : '✕ ' + esc(a.checkin_message || '失败')) : '今天还没签到'}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        ${state}
+        <a class="btn small" href="/accounts/${a.id}">详情</a>
+        ${a.supports_checkin ? `<button class="small ghost" onclick="checkinOne(${a.id}, this)">签到</button>` : ''}
+        <button class="small ghost" onclick="accAction(${a.id},'${a.enabled ? 'disable' : 'enable'}')">${a.enabled ? '停用' : '启用'}</button>
+        <button class="small ghost" onclick="delAccount(${a.id})">移除</button>
+      </div>
     </div>`;
   }).join('');
+  requestAnimationFrame(() => document.querySelectorAll('#vendor-accounts .progress > div[data-w]')
+    .forEach(d => { d.style.width = d.dataset.w + '%'; }));
 }
 
-/* ---------------- 成员 ---------------- */
+window.accAction = async (id, action) => {
+  try {
+    await api('/api/accounts/action', { method: 'POST', body: JSON.stringify({ id, action }) });
+    toast(action === 'enable' ? '账号已启用' : '账号已停用');
+    await loadAccounts();
+  } catch (e) { toast(e.message, 'err'); }
+};
+window.delAccount = async (id) => {
+  if (!confirm('移除这个账号？')) return;
+  try {
+    await api('/api/accounts/' + id, { method: 'DELETE' });
+    toast('账号已移除');
+    await loadAccounts();
+    loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+window.syncAll = async (btn) => {
+  btn.disabled = true; btn.textContent = '同步中…';
+  try {
+    const r = await api('/api/accounts/sync', { method: 'POST', body: '{}' });
+    const ok = (r.results || []).filter(x => x.ok).length;
+    toast(`已同步 ${ok} 个账号的额度`);
+    await loadAccounts(); loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = '同步额度';
+};
+
+window.checkinOne = async (id, btn) => {
+  if (btn) { btn.disabled = true; btn.textContent = '签到中…'; }
+  try {
+    const res = await api('/api/accounts/checkin', {
+      method: 'POST', body: JSON.stringify({ id }) });
+    renderCheckin(res);
+    await loadAccounts(); loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '签到'; } }
+};
+window.checkinAll = async (btn) => {
+  btn.disabled = true; btn.textContent = '签到中…';
+  try {
+    const res = await api('/api/accounts/checkin', { method: 'POST', body: '{}' });
+    renderCheckin(res);
+    await loadAccounts(); loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = '一键签到';
+};
+
+function renderCheckin(res) {
+  const box = document.getElementById('checkin-result');
+  if (!res.results || !res.results.length) {
+    box.innerHTML = `<div class="note">没有需要签到的账号</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="card" style="border-color:var(--gold-line)">
+    <h3 class="section">签到结果 · 共到账 ${Number(res.earned || 0).toFixed(0)} 积分</h3>
+    ${res.results.map(r => `<div class="checkin-line ${r.ok ? 'ok' : 'err'}">
+      ${r.ok ? '✓' : '✕'} <b>${esc(r.name)}</b>　${esc(r.message || '')}</div>`).join('')}
+  </div>`;
+}
+
+/* 厂商与凭证表单 */
+function renderProviderPicker(selected) {
+  const box = document.getElementById('a-providers');
+  box.innerHTML = PROVIDERS.map(p => `
+    <button type="button" class="chip ${p.slug === selected ? 'on' : ''}" data-prov="${p.slug}"
+      style="${p.slug === selected ? `border-color:${p.color};color:${p.color}` : ''}">
+      <span class="tick">✓</span>${esc(p.label)}
+      <span class="chip-prov">${p.available ? '可用' : '待接入'}</span>
+    </button>`).join('');
+  box.querySelectorAll('[data-prov]').forEach(b =>
+    b.addEventListener('click', () => selectProvider(b.dataset.prov)));
+}
+
+function selectProvider(slug) {
+  const prov = PROVIDERS.find(p => p.slug === slug);
+  if (!prov) return;
+  renderProviderPicker(slug);
+  const sel = document.getElementById('a-region');
+  sel.innerHTML = (prov.regions || []).map(r =>
+    `<option value="${r.id}">${esc(r.label)}</option>`).join('');
+  document.getElementById('a-region-field').style.display =
+    (prov.regions || []).length > 1 ? '' : 'none';
+  document.getElementById('a-cred-label').textContent =
+    prov.slug === 'qoder' ? 'Personal Access Token' : 'API Key';
+  document.getElementById('a-cred').placeholder = prov.credential_hint || '';
+  document.getElementById('a-cred').value = '';
+  document.getElementById('a-cred-hint').innerHTML =
+    prov.credential_url
+      ? `在 <a href="${esc(prov.credential_url)}" target="_blank" rel="noopener"
+           style="color:var(--gold)">${esc(prov.credential_url)}</a> 创建`
+      : (prov.credential_hint || '');
+  const note = document.getElementById('a-provider-note');
+  if (!prov.available) {
+    note.style.display = '';
+    note.textContent = `${prov.label} 的接入协议还没实现，这一步会失败。界面和数据模型已经支持多厂商，补上适配器即可启用。`;
+  } else {
+    note.style.display = 'none';
+  }
+  document.getElementById('a-cred').dataset.provider = slug;
+}
+
+window.openAccountModal = () => {
+  const first = PROVIDERS.find(p => p.available) || PROVIDERS[0];
+  if (first) selectProvider(first.slug);
+  openModal('account-modal');
+};
+
+window.addAccount = async (btn) => {
+  const cred = document.getElementById('a-cred').value.trim();
+  const provider = document.getElementById('a-cred').dataset.provider || 'qoder';
+  const region = document.getElementById('a-region').value;
+  if (!cred) { toast('请填写凭证', 'err'); return; }
+  btn.disabled = true;
+  try {
+    const d = await api('/api/accounts', { method: 'POST',
+      body: JSON.stringify({ provider, credential: cred, region }) });
+    closeModal('account-modal');
+    toast(`已接入 ${d.account.name || d.account.email || d.account.uid}`);
+    await loadAccounts(); loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+};
+
+/* ───────── 成员 ───────── */
 async function loadMembers() {
   const body = document.getElementById('member-body');
   try {
     const [m, a] = await Promise.all([api('/api/members'), api('/api/accounts')]);
-    MEMBERS = m.members; ACCOUNTS = a.accounts;
-    renderMemberLimits();
+    MEMBERS = m.members || [];
+    ACCOUNTS = a.accounts || [];
     if (!MEMBERS.length) {
       body.innerHTML = '<tr><td colspan="8" class="empty">还没有成员，先新增一个</td></tr>';
       return;
@@ -782,64 +745,144 @@ async function loadMembers() {
       const dPct = m.limit_daily > 0 ? Math.min(100, (m.used_today / m.limit_daily) * 100) : 0;
       const wPct = m.limit_weekly > 0 ? Math.min(100, (m.used_week / m.limit_weekly) * 100) : 0;
       const cls = p => p >= 95 ? 'progress err' : p >= 70 ? 'progress warn' : 'progress';
-      return `<tr>
-        <td class="wrap" style="max-width:190px"><strong>${esc(m.name)}</strong>
-          ${m.is_admin ? '<span class="pill ok">管理员</span>' : ''}
+      const chips = (m.model_allowlist || '').split(',').map(s => s.trim()).filter(Boolean);
+      return `<tr data-mid="${m.id}" style="cursor:pointer">
+        <td data-label="成员" style="max-width:200px;white-space:normal">
+          <strong class="serif" style="font-size:15.5px">${esc(m.name)}</strong>
+          ${m.is_admin ? '<span class="pill gold">管理员</span>' : ''}
+          ${m.enabled ? '' : '<span class="pill off">停用</span>'}
           <div class="sub">${m.username ? esc(m.username) : '未设登录账号'}${m.email ? ' · ' + esc(m.email) : ''}</div>
           <div class="sub">${m.preferred_account ? '优先 ' + esc(m.preferred_account) : '共用账号池'}</div>
-          ${m.note ? `<div class="hint">${esc(m.note)}</div>` : ''}</td>
-        <td class="mono">${num(m.used_today)} ${m.limit_daily > 0 ? '/ ' + num(m.limit_daily) : '<span style="color:var(--ink-faint)">不限</span>'}
-          ${m.limit_daily > 0 ? `<div class="${cls(dPct)}"><div style="width:${dPct}%"></div></div>` : ''}</td>
-        <td class="mono">${num(m.used_week)} ${m.limit_weekly > 0 ? '/ ' + num(m.limit_weekly) : '<span style="color:var(--ink-faint)">不限</span>'}
-          ${m.limit_weekly > 0 ? `<div class="${cls(wPct)}"><div style="width:${wPct}%"></div></div>` : ''}</td>
-        <td class="num">${int(m.requests)}<div class="sub">${pctLabel(m.success_rate)}</div></td>
-        <td class="num">${int(m.tokens)}</td>
-        <td class="num">${num(m.used_total, 4)}
-          ${m.by_model && m.by_model.length ? `<div><button class="small ghost" data-detail="m-det-${m.id}" onclick="toggleDetail(this)">按模型 ▾</button></div>` : ''}</td>
-        <td class="wrap" style="max-width:200px">${m.keys.length ? m.keys.map((k, i) =>
-              `<div style="margin-bottom:8px">
-                 <div class="mono keycell" id="key-${k.id}" style="font-size:11px">${esc(shortKey(k.key, k.prefix))}</div>
-                 <div style="margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-                   ${k.enabled ? '' : '<span class="pill off">停用</span>'}
-                   ${k.key ? `<button class="small ghost copy-btn" data-key="${esc(k.key)}">复制</button>
-                              <button class="small ghost" onclick="revealKey('key-${k.id}', this)">查看</button>` : ''}
-                 </div>
-               </div>`).join('')
-            : '<span style="color:var(--ink-faint)">无</span>'}
-          <button class="small ghost" onclick="openKeyModal(${m.id},'${esc(m.name)}')">+ 密钥</button></td>
-        <td>${m.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill off">停用</span>'}
-          <div class="row-actions tight">
-          <button class="small" onclick="editMember(${m.id})">编辑</button>
-          <button class="small" onclick="toggleMember(${m.id},${!m.enabled})">${m.enabled ? '停用' : '启用'}</button>
-          <button class="small ghost" onclick="delMember(${m.id})">删除</button>
-        </div></td>
-      </tr>
-      ${m.by_model && m.by_model.length ? `<tr id="m-det-${m.id}" style="display:none">
-        <td colspan="8" style="background:var(--paper-raised);padding:12px 16px">
-          <div class="hint" style="margin:0 0 8px">${esc(m.name)} 的按模型明细（累计）</div>
-          ${modelBreakdown(m.by_model)}
         </td>
-      </tr>` : ''}`;
+        <td data-label="今日 / 上限" class="mono" style="min-width:120px">${m.used_today.toFixed(2)} /
+          ${m.limit_daily > 0 ? m.limit_daily.toFixed(1) : '不限'}
+          ${m.limit_daily > 0 ? `<div class="${cls(dPct)}"><div data-w="${dPct.toFixed(1)}"></div></div>` : ''}</td>
+        <td data-label="本周 / 上限" class="mono" style="min-width:120px">${m.used_week.toFixed(2)} /
+          ${m.limit_weekly > 0 ? m.limit_weekly.toFixed(1) : '不限'}
+          ${m.limit_weekly > 0 ? `<div class="${cls(wPct)}"><div data-w="${wPct.toFixed(1)}"></div></div>` : ''}</td>
+        <td data-label="请求 · 成功率" class="num">${fmtInt(m.requests)}<div class="sub">${pctCell(m.success_rate)}</div></td>
+        <td data-label="Token" class="num">${fmtCompact(m.tokens)}</td>
+        <td data-label="积分" class="num">${m.used_total.toFixed(3)}</td>
+        <td data-label="可用模型" style="white-space:normal;max-width:230px">
+          ${chips.length ? chips.slice(0, 6).map(c =>
+            `<span class="pill" style="margin:0 3px 3px 0">${esc(modelById(c).name)}</span>`).join('')
+            + (chips.length > 6 ? `<span class="pill off">+${chips.length - 6}</span>` : '')
+            : '<span class="hint">不限</span>'}
+        </td>
+        <td data-label="操作">
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="small" data-act="edit">编辑</button>
+            <button class="small ghost" data-act="key">密钥</button>
+            <button class="small ghost" data-act="toggle">${m.enabled ? '停用' : '启用'}</button>
+            <button class="small ghost" data-act="del">删除</button>
+          </div>
+        </td>
+      </tr>`;
     }).join('');
+
+    requestAnimationFrame(() => body.querySelectorAll('.progress > div[data-w]')
+      .forEach(d => { d.style.width = d.dataset.w + '%'; }));
+
+    body.querySelectorAll('tr[data-mid]').forEach(tr => {
+      const id = Number(tr.dataset.mid);
+      tr.addEventListener('click', e => {
+        const act = e.target.closest('[data-act]');
+        if (!act) { editMember(id); return; }
+        e.stopPropagation();
+        if (act.dataset.act === 'edit') editMember(id);
+        if (act.dataset.act === 'key') {
+          const m = MEMBERS.find(x => x.id === id);
+          openKeyModal(id, m ? m.name : '');
+        }
+        if (act.dataset.act === 'toggle') toggleMember(id);
+        if (act.dataset.act === 'del') delMember(id);
+      });
+    });
   } catch (e) {
     body.innerHTML = `<tr><td colspan="8" class="empty">${esc(e.message)}</td></tr>`;
   }
 }
 
-function openMemberModal() {
-  document.getElementById('member-modal-title').textContent = '新增成员';
-  document.getElementById('m-id').value = '';
-  ['m-name','m-email','m-daily','m-weekly','m-note','m-username','m-password'].forEach(id =>
-    document.getElementById(id).value = '');
-  document.getElementById('m-models').value = 'qfmodel,gfmodel,dfmodel';
-  const sel = document.getElementById('m-account');
-  sel.innerHTML = '<option value="">不指定，共用账号池</option>' +
-    ACCOUNTS.map(a => `<option value="${a.id}">${esc(a.name || a.email)}（余 ${num(a.credits_remaining, 1)}）</option>`).join('');
-  sel.value = '';
-  openModal('member-modal');
+/* 模型标签选择器 */
+let pickedModels = new Set();
+
+function renderModelChips() {
+  const box = document.getElementById('m-models');
+  // 已选但不在目录里的 id 也要显示出来，否则读取失败时看不到原有配置
+  const known = new Set(MODELS.map(m => m.id));
+  const extra = [...pickedModels].filter(id => !known.has(id))
+    .map(id => ({ id, name: id, provider: '' }));
+  const list = [...MODELS, ...extra];
+  if (!list.length) {
+    box.innerHTML = '<span class="hint">还没有读到模型目录，接入一个可用账号后刷新。</span>';
+    return;
+  }
+  box.innerHTML = list.map(m => `
+    <button type="button" class="chip ${pickedModels.has(m.id) ? 'on' : ''}" data-model="${esc(m.id)}">
+      <span class="tick">✓</span>${esc(m.name)}
+      ${m.provider ? `<span class="chip-prov">${esc(provLabel(m.provider))}</span>` : ''}
+    </button>`).join('');
+  box.querySelectorAll('[data-model]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.model;
+    if (pickedModels.has(id)) { pickedModels.delete(id); b.classList.remove('on'); }
+    else { pickedModels.add(id); b.classList.add('on'); }
+    updateModelHint();
+  }));
+  updateModelHint();
 }
 
-function editMember(id) {
+function updateModelHint() {
+  document.getElementById('m-models-hint').textContent = pickedModels.size
+    ? `已选 ${pickedModels.size} 个模型：${[...pickedModels].map(id => modelById(id).name).join('、')}`
+    : '一个都不选表示不限制模型。';
+}
+
+document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
+  const p = b.dataset.preset;
+  if (p === 'all') pickedModels = new Set(MODELS.map(m => m.id));
+  else if (p === 'none') pickedModels = new Set();
+  else pickedModels = new Set(MODELS.filter(m => /flash/i.test(m.name)).map(m => m.id));
+  renderModelChips();
+}));
+
+async function ensureModels() {
+  if (MODELS.length) return;
+  try {
+    const s = await api('/api/status');
+    MODELS = s.models || [];
+    PROVIDERS = s.providers || PROVIDERS;
+    STATUS = s;
+  } catch { /* 读不到就只显示已配置的 id */ }
+}
+
+window.openMemberModal = async () => {
+  await ensureModels();
+  document.getElementById('member-modal-title').textContent = '新增成员';
+  document.getElementById('m-id').value = '';
+  ['m-name', 'm-email', 'm-daily', 'm-weekly', 'm-note', 'm-username', 'm-password']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  pickedModels = new Set(MODELS.filter(m => /flash/i.test(m.name)).map(m => m.id));
+  if (!pickedModels.size) pickedModels = new Set(MODELS.map(m => m.id));
+  renderModelChips();
+  fillAccountSelect(null);
+  openModal('member-modal');
+};
+
+function fillAccountSelect(current) {
+  const sel = document.getElementById('m-account');
+  const groups = {};
+  ACCOUNTS.forEach(a => {
+    (groups[a.provider] = groups[a.provider] || []).push(a);
+  });
+  sel.innerHTML = '<option value="">不指定 · 共用账号池</option>' +
+    Object.entries(groups).map(([slug, list]) => `<optgroup label="${esc(provLabel(slug))}">` +
+      list.map(a => `<option value="${a.id}">${esc(a.name || a.email || a.uid)}
+        （余 ${Number(a.credits_remaining).toFixed(1)}）</option>`).join('') + '</optgroup>').join('');
+  sel.value = current || '';
+}
+
+window.editMember = async (id) => {
+  await ensureModels();
   const m = MEMBERS.find(x => x.id === id);
   if (!m) return;
   document.getElementById('member-modal-title').textContent = '编辑成员';
@@ -848,18 +891,16 @@ function editMember(id) {
   document.getElementById('m-email').value = m.email || '';
   document.getElementById('m-daily').value = m.limit_daily || '';
   document.getElementById('m-weekly').value = m.limit_weekly || '';
-  document.getElementById('m-models').value = m.model_allowlist || '';
   document.getElementById('m-note').value = m.note || '';
   document.getElementById('m-username').value = m.username || '';
   document.getElementById('m-password').value = '';
-  const sel = document.getElementById('m-account');
-  sel.innerHTML = '<option value="">不指定，共用账号池</option>' +
-    ACCOUNTS.map(a => `<option value="${a.id}">${esc(a.name || a.email)}（余 ${num(a.credits_remaining, 1)}）</option>`).join('');
-  sel.value = m.preferred_account_id || '';
+  pickedModels = new Set((m.model_allowlist || '').split(',').map(s => s.trim()).filter(Boolean));
+  renderModelChips();
+  fillAccountSelect(m.preferred_account_id);
   openModal('member-modal');
-}
+};
 
-async function saveMember() {
+window.saveMember = async (btn) => {
   const id = document.getElementById('m-id').value;
   const payload = {
     name: document.getElementById('m-name').value.trim(),
@@ -867,268 +908,177 @@ async function saveMember() {
     limit_daily: parseFloat(document.getElementById('m-daily').value || '0'),
     limit_weekly: parseFloat(document.getElementById('m-weekly').value || '0'),
     preferred_account_id: parseInt(document.getElementById('m-account').value || '0') || null,
-    model_allowlist: document.getElementById('m-models').value.trim(),
+    model_allowlist: [...pickedModels].join(','),
     note: document.getElementById('m-note').value.trim(),
     username: document.getElementById('m-username').value.trim(),
     password: document.getElementById('m-password').value,
   };
-  if (!payload.name) { alert('请填写名字'); return; }
+  if (!payload.name) { toast('请填写名字', 'err'); return; }
+  btn.disabled = true;
   try {
     if (id) await api('/api/members/' + id, { method: 'PATCH', body: JSON.stringify(payload) });
     else await api('/api/members', { method: 'POST', body: JSON.stringify(payload) });
     closeModal('member-modal');
-    loadMembers(); loadOverview();
-  } catch (e) { alert(e.message); }
-}
+    toast('已保存');
+    await loadMembers();
+    loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+};
 
-async function toggleMember(id, enabled) {
-  try { await api('/api/members/' + id, { method: 'PATCH', body: JSON.stringify({ enabled }) }); }
-  catch (e) { alert(e.message); }
-  loadMembers();
+async function toggleMember(id) {
+  const m = MEMBERS.find(x => x.id === id);
+  if (!m) return;
+  try {
+    await api('/api/members/' + id, { method: 'PATCH',
+      body: JSON.stringify({ enabled: !m.enabled }) });
+    await loadMembers();
+  } catch (e) { toast(e.message, 'err'); }
 }
-
 async function delMember(id) {
   if (!confirm('删除这个成员？他名下的密钥会一并失效。')) return;
-  try { await api('/api/members/' + id, { method: 'DELETE' }); }
-  catch (e) { alert(e.message); }
-  loadMembers(); loadOverview();
+  try {
+    await api('/api/members/' + id, { method: 'DELETE' });
+    toast('成员已删除');
+    await loadMembers(); loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
-/* ---------------- 密钥 ---------------- */
-function openKeyModal(memberId, name) {
+/* 密钥 */
+window.openKeyModal = (memberId, name) => {
   document.getElementById('k-member').value = memberId;
   document.getElementById('k-member-name').textContent = name;
   document.getElementById('k-ip').value = '';
   document.getElementById('k-note').value = '';
   document.getElementById('k-result').innerHTML = '';
   openModal('key-modal');
-}
-
-async function createKey() {
-  const memberId = document.getElementById('k-member').value;
+};
+window.createKey = async (btn) => {
+  btn.disabled = true;
   try {
-    const d = await api('/api/keys', {
-      method: 'POST',
-      body: JSON.stringify({
-        member_id: parseInt(memberId),
-        ip_allowlist: document.getElementById('k-ip').value.trim(),
-        note: document.getElementById('k-note').value.trim(),
-      }),
-    });
+    const d = await api('/api/keys', { method: 'POST', body: JSON.stringify({
+      member_id: parseInt(document.getElementById('k-member').value),
+      ip_allowlist: document.getElementById('k-ip').value.trim(),
+      note: document.getElementById('k-note').value.trim(),
+    }) });
     document.getElementById('k-result').innerHTML =
       `<div class="keybox">${esc(d.key)}</div>
        <div class="hint">这条密钥保存在成员列表里，随时可以查看和复制。</div>`;
-    loadMembers();
-  } catch (e) { alert(e.message); }
-}
+    await loadMembers();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+};
 
-/* ---------------- 账号 ---------------- */
-async function loadAccounts() {
-  const body = document.getElementById('account-body');
-  try {
-    const d = await api('/api/accounts');
-    ACCOUNTS = d.accounts;
-    renderAccountCredits();
-    const pending = ACCOUNTS.filter(a => !a.checkin_at).length;
-    document.getElementById('checkin-hint').textContent = pending
-      ? `${pending} 个账号今天还没签到` : '';
-    if (!ACCOUNTS.length) {
-      body.innerHTML = '<tr><td colspan="8" class="empty">还没有接入账号</td></tr>';
-      return;
-    }
-    body.innerHTML = ACCOUNTS.map(a => {
-      const pct = a.credits_total > 0 ? (a.credits_remaining / a.credits_total) * 100 : 0;
-      const state = !a.enabled ? '<span class="pill off">停用</span>'
-        : a.cooldown > 0 ? `<span class="pill warn">冷却 ${a.cooldown}s</span>`
-        : '<span class="pill ok">可用</span>';
-      const expire = a.credits_expire_at
-        ? new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN')
-        : '不过期';
-      return `<tr>
-        <td class="wrap" style="max-width:200px"><strong>${esc(a.name || a.email)}</strong>
-          <div class="sub">${esc(a.email)}</div>
-          <div class="sub">${a.region === 'cn' ? '国内版' : '国际版'}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
-          <div class="sub">${a.bound_members.length ? '绑定 ' + a.bound_members.map(esc).join('、') : '无绑定成员'}</div></td>
-        <td class="mono" style="min-width:150px">${num(a.credits_remaining, 1)}
-          <span style="color:var(--ink-faint)">/ ${num(a.credits_total, 0)}</span>
-          <div class="progress"><div style="width:${pct}%"></div></div>
-          <div class="sub">已用 ${num(a.credits_used, 1)} · ${expire}${a.credits_exceeded && a.credits_total > 0 ? ' · <span style="color:var(--err)">额度耗尽</span>' : ''}${a.credits_total <= 0 ? ' · <span style="color:var(--ink-faint)">无可用额度</span>' : ''}</div></td>
-        <td class="wrap" style="font-size:12.5px"><span class="mono">
-            套餐 ${num(a.credits_base_remaining, 0)}/${num(a.credits_base_total, 0)}<br>
-            赠送 ${num(a.credits_addon_remaining, 0)}/${num(a.credits_addon_total, 0)}
-            ${a.credits_shared_total > 0 ? `<br>共享 ${num(a.credits_shared_remaining, 0)}/${num(a.credits_shared_total, 0)}` : ''}
-          </span>
-          <div class="sub">${a.synced_ago !== null ? a.synced_ago + ' 秒前同步' : '未同步'}</div></td>
-        <td class="wrap" style="max-width:150px">
-          <button class="small" onclick="checkinOne(${a.id}, this)">${a.checkin_at ? '再签一次' : '签到'}</button>
-          ${a.checkin_at ? `<div class="sub" title="${esc(a.checkin_message || '')}">${a.checkin_ok ? '✓' : '✕'} ${esc(a.checkin_message || '')}</div>` : ''}
-        </td>
-        <td class="num">${int(a.requests)}<div class="sub">${pctLabel(a.success_rate)}</div></td>
-        <td class="num">${int(a.tokens)}</td>
-        <td class="num">${num(a.gateway_consumed, 4)}
-          ${a.by_model && a.by_model.length ? `<div><button class="small ghost" data-detail="a-det-${a.id}" onclick="toggleDetail(this)">按模型 ▾</button></div>` : ''}</td>
-        <td>${state}
-          <div class="row-actions tight">
-          <button class="small" onclick="accAction(${a.id},'${a.enabled ? 'disable' : 'enable'}')">${a.enabled ? '停用' : '启用'}</button>
-          <button class="small ghost" onclick="delAccount(${a.id})">移除</button>
-        </div></td>
-      </tr>
-      ${a.by_model && a.by_model.length ? `<tr id="a-det-${a.id}" style="display:none">
-        <td colspan="8" style="background:var(--paper-raised);padding:12px 16px">
-          <div class="hint" style="margin:0 0 8px">${esc(a.name || a.email)} 的按模型明细（累计）</div>
-          ${modelBreakdown(a.by_model)}
-        </td>
-      </tr>` : ''}`;
-    }).join('');
-  } catch (e) {
-    body.innerHTML = `<tr><td colspan="8" class="empty">${esc(e.message)}</td></tr>`;
-  }
-}
-
-/* 签到：单个账号或全部。结果写进工具栏下方的内联面板，不弹窗打断。 */
-function renderCheckinResult(res) {
-  const box = document.getElementById('checkin-result');
-  if (!box) return;
-  if (!res.results || !res.results.length) { box.innerHTML = ''; return; }
-  const rows = res.results.map(r => {
-    const cls = r.ok ? 'ok' : 'err';
-    const mark = r.ok ? '✓' : '✕';
-    const extra = r.earned > 0 ? ` · 获得 ${num(r.earned, 0)} 积分` : '';
-    return `<div class="checkin-line ${cls}">${mark} <b>${esc(r.name)}</b>　${esc(r.message || '')}${extra}</div>`;
-  }).join('');
-  box.innerHTML = `<div class="checkin-box">
-      <div class="head">签到完成 · 共获得 ${num(res.earned, 0)} 积分</div>${rows}</div>`;
-}
-
-async function checkinOne(id, btn) {
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = '签到中…'; }
-  try {
-    const res = await api('/api/accounts/checkin', {
-      method: 'POST', body: JSON.stringify({ id }),
-    });
-    applyCheckin(res);
-    renderCheckinResult(res);
-  } catch (e) { alert(e.message); }
-  finally { if (btn) { btn.disabled = false; if (old) btn.textContent = old; } }
-}
-
-async function checkinAll(btn) {
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = '签到中…'; }
-  try {
-    const res = await api('/api/accounts/checkin', { method: 'POST', body: '{}' });
-    applyCheckin(res);
-    renderCheckinResult(res);
-  } catch (e) { alert(e.message); }
-  finally { if (btn) { btn.disabled = false; if (old) btn.textContent = old; } }
-}
-
-function applyCheckin(res) {
-  if (res.accounts) { ACCOUNTS = res.accounts; }
-  loadAccounts();
-  loadOverview();
-}
-
-function openAccountModal() {
-  document.getElementById('a-pat').value = '';
-  openModal('account-modal');
-}
-
-async function addAccount() {
-  const pat = document.getElementById('a-pat').value.trim();
-  const region = document.getElementById('a-region').value;
-  if (!pat) { alert('请填写 PAT'); return; }
-  try {
-    const d = await api('/api/accounts', { method: 'POST', body: JSON.stringify({ pat, region }) });
-    closeModal('account-modal');
-    alert('已接入 ' + (d.account.name || d.account.email));
-    loadAccounts(); loadOverview();
-  } catch (e) { alert(e.message); }
-}
-
-async function syncAll() {
-  try {
-    await api('/api/accounts/sync', { method: 'POST', body: '{}' });
-    loadAccounts(); loadOverview();
-  } catch (e) { alert(e.message); }
-}
-
-async function accAction(id, action) {
-  try { await api('/api/accounts/action', { method: 'POST', body: JSON.stringify({ id, action }) }); }
-  catch (e) { alert(e.message); }
-  loadAccounts();
-}
-
-async function delAccount(id) {
-  if (!confirm('移除这个账号？')) return;
-  try { await api('/api/accounts/' + id, { method: 'DELETE' }); }
-  catch (e) { alert(e.message); }
-  loadAccounts(); loadOverview();
-}
-
-/* ---------------- 数据 ---------------- */
-async function loadAnalytics() {
+/* ───────── 数据 ───────── */
+async function loadAnalytics(btn, notify) {
+  if (btn) btn.disabled = true;
   try {
     const a = await api('/api/analytics');
-    ANALYTICS = a;
+    ANALYSIS = a;
     const t = a.totals;
-    document.getElementById('an-stats').innerHTML = `
-      <div class="stat"><div class="num">${int(t.requests)}</div>
-        <div class="lbl">累计请求 · 失败 ${int(t.errors)} 次</div></div>
-      <div class="stat"><div class="num">${pctLabel(t.success_rate)}</div>
-        <div class="lbl">请求成功率</div></div>
-      <div class="stat"><div class="num">${int(t.tokens)}</div><div class="lbl">累计 Token</div></div>
-      <div class="stat"><div class="num">${num(t.credits, 2)}<small>积分</small></div>
-        <div class="lbl">累计积分消耗</div></div>
-      <div class="stat"><div class="num">${int(t.requests_7d)}</div>
-        <div class="lbl">近 7 天请求 · ${int(t.tokens_7d)} Token</div></div>
-      <div class="stat"><div class="num">${num(t.credits_7d, 2)}<small>积分</small></div>
-        <div class="lbl">近 7 天积分消耗</div></div>`;
+    const kpi = (k, v, d = '') => `<div class="kpi"><div class="k">${esc(k)}</div>
+      <div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+    document.getElementById('an-kpi').innerHTML =
+      kpi('累计请求', `<span data-count="${t.requests}" data-dec="0">0</span>`,
+          `失败 ${fmtInt(t.errors)} · 成功率 ${t.success_rate == null ? '—' : t.success_rate.toFixed(1) + '%'}`) +
+      kpi('累计 Token', `<span data-count="${t.tokens}" data-dec="0">0</span>`,
+          `近 7 天 ${fmtCompact(t.tokens_7d)}`) +
+      kpi('累计积分', `<span data-count="${t.credits}" data-dec="2">0</span>`,
+          `近 7 天 ${t.credits_7d.toFixed(3)}`) +
+      kpi('近 7 天请求', `<span data-count="${t.requests_7d}" data-dec="0">0</span>`,
+          `日均 ${Math.round(t.requests_7d / 7)} 次`) +
+      kpi('在用模型', `${(a.by_model || []).length}`, `${(a.by_provider || []).length} 家厂商`);
+    document.querySelectorAll('#an-kpi [data-count]').forEach(n =>
+      countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
 
-    renderBars(document.getElementById('an-chart'), a.daily, 'requests', v => int(v));
+    barChart(document.getElementById('an-daily'), {
+      labels: a.daily.map(d => d.date),
+      values: a.daily.map(d => d.requests),
+      values2: a.daily.map(d => d.errors),
+      color: 'var(--gold)', color2: 'var(--err)', height: 200,
+    });
+
+    barChart(document.getElementById('an-hourly'), {
+      labels: a.hourly.map(h => h.hour),
+      values: a.hourly.map(h => h.requests),
+      color: 'var(--bronze)', height: 180,
+    });
+
+    histogram(document.getElementById('an-hist'), { bins: a.token_hist, height: 180 });
+
+    const palette = ['#b8912f', '#8a6a3a', '#6b7d5a', '#a98b6a', '#7b6b4a', '#8c8677'];
+    const pivot = a.model_pivot || { labels: [], series: [] };
+    document.getElementById('an-pivot-legend').innerHTML = pivot.series.map((s, i) => `
+      <span class="li"><span class="sw" style="background:${palette[i % palette.length]}"></span>
+      ${esc(modelById(s.model).name || s.model)}</span>`).join('');
+    stackedArea(document.getElementById('an-pivot'), {
+      labels: pivot.labels,
+      series: pivot.series.map((s, i) => ({
+        name: s.model, color: palette[i % palette.length], values: s.values })),
+      height: 220,
+    });
+
+    heatmap(document.getElementById('an-heat'), a.heatmap);
+
+    hbarList(document.getElementById('an-provider'), {
+      rows: (a.by_provider || []).map(p => ({
+        label: p.label, value: p.credits, color: p.color })),
+      fmt: v => v.toFixed(3), unit: ' 积分',
+    });
+    hbarList(document.getElementById('an-members'), {
+      rows: (a.by_member || []).map(m => ({
+        label: m.name, value: m.credits, color: 'var(--gold)' })),
+      fmt: v => v.toFixed(3), unit: ' 积分',
+    });
 
     renderTable(document.getElementById('an-models'), a.by_model, [
       { label: '模型', fmt: r => modelCell(r.id, r.model) },
-      { label: '请求量', cls: 'num', fmt: r => int(r.requests) },
-      { label: '失败', cls: 'num', fmt: r => int(r.errors) },
-      { label: '成功率', cls: 'num', fmt: r => pctLabel(r.success_rate) },
+      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
+      { label: '失败', cls: 'num', fmt: r => fmtInt(r.errors) },
+      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
       { label: 'Token', cls: 'num', fmt: r =>
-          `${int(r.tokens)}<div class="sub">入 ${int(r.prompt_tokens)} · 出 ${int(r.completion_tokens)}</div>` },
-      { label: '积分', cls: 'num', fmt: r => num(r.credits, 4) },
-    ], '还没有调用');
-
-    renderTable(document.getElementById('an-members'), a.by_member, [
-      { label: '成员', fmt: r => esc(r.name) },
-      { label: '请求量', cls: 'num', fmt: r => int(r.requests) },
-      { label: '失败', cls: 'num', fmt: r => int(r.errors) },
-      { label: '成功率', cls: 'num', fmt: r => pctLabel(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r => int(r.tokens) },
-      { label: '积分', cls: 'num', fmt: r => num(r.credits, 4) },
+          `${fmtInt(r.tokens)}<div class="sub">入 ${fmtCompact(r.prompt_tokens)} · 出 ${fmtCompact(r.completion_tokens)}</div>` },
+      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
     ], '还没有调用');
 
     renderTable(document.getElementById('an-accounts'), a.by_account, [
-      { label: '账号', fmt: r => esc(r.name) },
-      { label: '请求量', cls: 'num', fmt: r => int(r.requests) },
-      { label: '成功率', cls: 'num', fmt: r => pctLabel(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r => int(r.tokens) },
-      { label: '积分', cls: 'num', fmt: r => num(r.credits, 4) },
+      { label: '账号', fmt: r => `${esc(r.name)}<div class="sub" style="color:${r.provider_color}">${esc(r.provider_label)}</div>` },
+      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
+      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
+      { label: 'Token', cls: 'num', fmt: r => fmtCompact(r.tokens) },
+      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
     ], '还没有消耗');
-  } catch (e) {
-    document.getElementById('an-stats').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
-  }
-}
 
-/* ---------------- 接入页 ---------------- */
+    if (notify) toast('数据已刷新');
+  } catch (e) {
+    document.getElementById('an-kpi').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+  if (btn) btn.disabled = false;
+}
+window.loadAnalytics = loadAnalytics;
+
+/* ───────── 接入页 ───────── */
 async function loadSettings() {
-  document.getElementById('base-url').textContent =
-    location.origin + '/v1/chat/completions';
+  const base = location.origin + '/v1/chat/completions';
+  document.getElementById('base-url').textContent = base;
   try {
     const s = await api('/api/status');
-    document.getElementById('model-list').innerHTML = s.models.length
-      ? s.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--rule)">
-          <span style="min-width:200px">${esc(m.name)}</span>
-          <span class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(m.id)}</span>
+    MODELS = s.models || [];
+    PROVIDERS = s.providers || [];
+    const first = MODELS[0] ? MODELS[0].id : 'qfmodel';
+    document.getElementById('curl-example').textContent =
+`curl ${base} \\
+  -H "Authorization: Bearer sicau-PMT-..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"${first}","messages":[{"role":"user","content":"你好"}]}'`;
+    document.getElementById('model-list').innerHTML = MODELS.length
+      ? MODELS.map(m => `<div style="display:flex;gap:10px;align-items:baseline;
+            padding:6px 0;border-bottom:1px solid var(--rule)">
+          <span style="min-width:190px">${esc(m.name)}</span>
+          <span class="mono" style="color:var(--ink-faint);font-size:11px">${esc(m.id)}</span>
+          <span class="spacer" style="flex:1"></span>
+          <span class="pill" style="border-color:${provColor(m.provider)};color:${provColor(m.provider)}">
+            ${esc(provLabel(m.provider))}</span>
         </div>`).join('')
       : '尚未读取到模型';
   } catch (e) {
@@ -1143,22 +1093,64 @@ async function loadSettings() {
     }
     const nameOf = id => (MEMBERS.find(m => m.id === id) || {}).name || '—';
     body.innerHTML = u.recent.slice(0, 30).map(r => `<tr>
-      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
+        { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
       <td>${esc(nameOf(r.member_id))}</td>
-      <td>${esc(modelLabel(r.model))}<div class="mono" style="color:var(--ink-faint);font-size:11px">${esc(r.model)}</div></td>
-      <td class="mono">${num(r.credits, 4)}</td>
-      <td class="mono">${int(r.total_tokens)}</td>
+      <td>${esc(modelById(r.model).name)}<div class="sub">${esc(r.model)}</div></td>
+      <td class="num">${Number(r.credits).toFixed(4)}</td>
+      <td class="num">${fmtInt(r.total_tokens)}</td>
       <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
             : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
-      <td class="mono" style="font-size:11.5px">${esc(r.ip)}</td>
+      <td class="mono" style="font-size:11px">${esc(r.ip)}</td>
     </tr>`).join('');
   } catch { /* 忽略 */ }
 }
 
-/* ---------------- 启动 ---------------- */
-loadOverview(); loadMembers(); loadAccounts();
-const INITIAL_PAGE = location.hash.replace('#', '');
-if (INITIAL_PAGE && document.getElementById('page-' + INITIAL_PAGE)) show(INITIAL_PAGE);
+/* ───────── 表格与格式 ───────── */
+function pctCell(rate) {
+  if (rate == null) return '<span class="hint">—</span>';
+  const cls = rate >= 95 ? 'ok' : rate >= 80 ? 'warn' : 'err';
+  return `<span class="pill ${cls}">${rate.toFixed(1)}%</span>`;
+}
+function modelCell(id, name) {
+  const m = modelById(id);
+  const label = name || m.name || id;
+  return label === id ? `<span class="mono">${esc(id)}</span>`
+    : `${esc(label)}<div class="sub">${esc(id)}</div>`;
+}
+function renderTable(el, rows, cols, empty) {
+  if (!rows || !rows.length) {
+    el.innerHTML = `<tbody><tr><td class="empty">${esc(empty || '暂无数据')}</td></tr></tbody>`;
+    return;
+  }
+  el.innerHTML = `<thead><tr>${cols.map(c =>
+      `<th class="${c.cls || ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c =>
+      `<td class="${c.cls || ''}">${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody>`;
+}
+
+/* ───────── 启动 ───────── */
+const initial = location.hash.replace('#', '');
+loadOverview();
+loadMembers();
+loadAccounts();
+if (initial && document.getElementById('page-' + initial)) show(initial);
+window.addEventListener('hashchange', () => {
+  const page = location.hash.replace('#', '');
+  if (page && document.getElementById('page-' + page)) {
+    document.querySelectorAll('#nav a').forEach(a =>
+      a.classList.toggle('active', a.dataset.page === page));
+    document.querySelectorAll('.page').forEach(p =>
+      p.classList.toggle('active', p.id === 'page-' + page));
+    if (page === 'analytics') loadAnalytics();
+    if (page === 'settings') loadSettings();
+  }
+});
+document.addEventListener('themechange', () => {
+  // 图表颜色来自 CSS 变量，切换主题后重绘一次
+  if (ANALYSIS) loadAnalytics();
+  else loadOverview();
+});
 </script>
 </body>
 </html>

@@ -173,13 +173,13 @@ class TestStore(QuotaBase):
         self.assertIsNone(self.store.get_key_by_hash(Store.hash_key("qk-nope")))
 
     def test_account_upsert(self):
-        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
-        b = self.store.add_account(uid="u1", region="global", pat="pt-b")
+        a = self.store.add_account(uid="u1", region="global", credential="pt-a")
+        b = self.store.add_account(uid="u1", region="global", credential="pt-b")
         self.assertEqual(len(self.store.list_accounts()), 1)
         self.assertEqual(a, b)
 
     def test_account_credits_snapshot(self):
-        aid = self.store.add_account(uid="u1", region="global", pat="pt-a")
+        aid = self.store.add_account(uid="u1", region="global", credential="pt-a")
         self.store.set_account_credits(aid, total=300, used=5, remaining=295,
                                        addon=200, plan="trial")
         acc = self.store.get_account(aid)
@@ -188,27 +188,27 @@ class TestStore(QuotaBase):
         self.assertEqual(acc["plan_name"], "trial")
 
     def test_pick_prefers_bound_account(self):
-        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
-        b = self.store.add_account(uid="u2", region="global", pat="pt-b")
+        a = self.store.add_account(uid="u1", region="global", credential="pt-a")
+        b = self.store.add_account(uid="u2", region="global", credential="pt-b")
         self.store.touch_account(b)  # b 刚用过
         self.assertEqual(self.store.pick_account("global", prefer_id=a)["id"], a)
 
     def test_pick_falls_back_when_bound_disabled(self):
         """绑定的账号不可用时回退到其他账号。"""
-        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
-        b = self.store.add_account(uid="u2", region="global", pat="pt-b")
+        a = self.store.add_account(uid="u1", region="global", credential="pt-a")
+        b = self.store.add_account(uid="u2", region="global", credential="pt-b")
         self.store.set_account_enabled(a, False)
         self.assertEqual(self.store.pick_account("global", prefer_id=a)["id"], b)
 
     def test_pick_skips_cooldown(self):
-        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
+        a = self.store.add_account(uid="u1", region="global", credential="pt-a")
         self.store.set_account_cooldown(a, 300, "err")
         self.assertIsNone(self.store.pick_account("global"))
 
     def test_pick_excludes_tried_accounts(self):
         """一个账号排队时换别的账号重试，试过的要跳过、试遍了返回 None。"""
-        a = self.store.add_account(uid="u1", region="global", pat="pt-a")
-        b = self.store.add_account(uid="u2", region="global", pat="pt-b")
+        a = self.store.add_account(uid="u1", region="global", credential="pt-a")
+        b = self.store.add_account(uid="u2", region="global", credential="pt-b")
         first = self.store.pick_account("global")
         second = self.store.pick_account("global", exclude={first["id"]})
         self.assertNotEqual(first["id"], second["id"])
@@ -216,8 +216,8 @@ class TestStore(QuotaBase):
         self.assertIsNone(self.store.pick_account("global", exclude={a, b}))
 
     def test_list_accounts_filters_by_region(self):
-        self.store.add_account(uid="u1", region="global", pat="pt-a")
-        self.store.add_account(uid="u2", region="cn", pat="pt-b")
+        self.store.add_account(uid="u1", region="global", credential="pt-a")
+        self.store.add_account(uid="u2", region="cn", credential="pt-b")
         self.assertEqual([x["region"] for x in self.store.list_accounts("cn")], ["cn"])
         self.assertEqual(len(self.store.list_accounts()), 2)
 

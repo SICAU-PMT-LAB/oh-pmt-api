@@ -1,143 +1,33 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>qoder2api · 我的用量</title>
+<title>我的用量 · oh-pmt-api</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/ui.css">
 <style>
-  :root {
-    --paper: #faf9f5;
-    --paper-raised: #f5f3ee;
-    --paper-deep: #efece4;
-    --ink: #1a1915;
-    --ink-soft: #5c5a54;
-    --ink-faint: #8b887f;
-    --rule: #e3e0d6;
-    --rule-strong: #d2cec2;
-    --accent: #c15f3c;
-    --accent-soft: #f5e8e2;
-    --ok: #4a6b52;
-    --warn: #96702f;
-    --err: #a33b2c;
-    --serif: "Tiempos Text", "Copernicus", Charter, "Iowan Old Style",
-             "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC",
-             "Noto Serif CJK SC", serif;
-    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  .quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .quota-card { border: 1px solid var(--rule); border-radius: 10px; padding: 20px 22px;
+                background: var(--card); position: relative; overflow: hidden; }
+  .quota-card::before {
+    content: ""; position: absolute; inset: 0; border-radius: 9px; padding: 1px;
+    background: linear-gradient(140deg, var(--gold), transparent 45%, transparent 60%, var(--gold));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; opacity: .5;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
-  .layout { display: flex; min-height: 100vh; }
-
-  .sidebar {
-    width: 224px; flex: 0 0 224px; background: var(--paper-deep);
-    border-right: 1px solid var(--rule); padding: 34px 0 24px;
-    display: flex; flex-direction: column;
-    position: sticky; top: 0; height: 100vh;
-  }
-  .brand { padding: 0 24px 26px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
-  .brand .kicker {
-    font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em;
-    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
-  }
-  .brand h1 { font-size: 20px; font-weight: 400; margin: 0; }
-  .whoami { padding: 0 24px 20px; }
-  .whoami .name { font-size: 16px; }
-  .whoami .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
-  nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
-  nav a {
-    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-    border-radius: 6px; color: var(--ink-soft); text-decoration: none; font-size: 14.5px;
-    transition: background .14s, color .14s;
-  }
-  nav a:hover { background: #e8e4da; color: var(--ink); }
-  nav a.active { background: var(--ink); color: var(--paper); }
-  nav a .ico { width: 15px; text-align: center; opacity: .75; font-size: 13px; }
-
-  .main { flex: 1; min-width: 0; padding: 40px 48px 80px; }
-  .page { display: none; }
-  .page.active { display: block; animation: fade .2s ease; }
-  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
-
-  .page-head { margin-bottom: 30px; }
-  .page-head h2 { font-size: 28px; font-weight: 400; margin: 0 0 6px; letter-spacing: -.015em; }
-  .page-head p { margin: 0; color: var(--ink-soft); max-width: 640px; }
-
-  h3 {
-    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
-    letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
-    margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
-  }
-
-  .quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 26px; }
-  .quota-card {
-    border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; background: #fff;
-  }
-  .quota-card .label {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
-    text-transform: uppercase; color: var(--ink-faint);
-  }
-  .quota-card .big { font-size: 34px; font-weight: 400; line-height: 1.1; margin: 6px 0 2px; letter-spacing: -.02em; }
+  .quota-card .label { font-family: var(--mono); font-size: 9px; letter-spacing: .14em;
+                       text-transform: uppercase; color: var(--ink-faint); }
+  .quota-card .big { font-family: var(--serif); font-size: 34px; font-weight: 500;
+                     line-height: 1.1; margin: 8px 0 3px; font-variant-numeric: tabular-nums; }
   .quota-card .big small { font-size: 14px; color: var(--ink-faint); margin-left: 4px; }
-  .quota-card .of { font-size: 13.5px; color: var(--ink-soft); }
-  .progress { background: var(--paper-raised); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 12px; }
-  .progress > div { height: 100%; background: var(--ok); border-radius: 4px; transition: width .3s; }
-  .progress.warn > div { background: var(--warn); }
-  .progress.err > div { background: var(--err); }
-
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th {
-    text-align: left; font-family: var(--mono); font-size: 10px; font-weight: 500;
-    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
-    padding: 0 12px 9px 0; border-bottom: 1px solid var(--rule-strong); white-space: nowrap;
-  }
-  td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
-  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
-  .empty { color: var(--ink-faint); font-style: italic; padding: 20px 0; }
-
-  .pill {
-    display: inline-block; font-family: var(--mono); font-size: 10.5px;
-    padding: 2px 9px; border-radius: 999px; border: 1px solid var(--rule-strong);
-    color: var(--ink-soft); white-space: nowrap; margin: 0 5px 5px 0;
-  }
-  .pill.ok { color: var(--ok); border-color: #c3d2c6; background: #eef3ef; }
-
-  .chart-wrap { background: #fff; border: 1px solid var(--rule); border-radius: 10px; padding: 22px 24px; margin-bottom: 20px; }
-  .bars { display: flex; align-items: flex-end; gap: 5px; height: 140px; margin-top: 10px; }
-  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
-  .bar { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; }
-  .bar-lbl { font-family: var(--mono); font-size: 9px; color: var(--ink-faint); }
-  .bar-val { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); }
-
-  .codebox {
-    font-family: var(--mono); font-size: 12.5px; background: var(--ink);
-    color: var(--paper); padding: 14px 16px; border-radius: 6px;
-    word-break: break-all; margin-top: 10px; line-height: 1.7;
-  }
-  button {
-    font-family: var(--serif); font-size: 12.5px; padding: 5px 12px; border-radius: 6px;
-    border: 1px solid var(--rule-strong); background: #fff; color: var(--ink); cursor: pointer;
-  }
-  button:hover { background: var(--paper-raised); }
-  .card { border: 1px solid var(--rule); border-radius: 10px; padding: 24px; background: #fff; margin-bottom: 20px; }
-  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 6px; line-height: 1.5; }
-  .note {
-    border-left: 3px solid var(--accent); background: var(--accent-soft);
-    padding: 12px 16px; font-size: 13.5px; color: var(--ink-soft);
-    border-radius: 0 6px 6px 0; margin: 16px 0;
-  }
-
-  @media (max-width: 860px) {
-    .layout { flex-direction: column; }
-    .sidebar { width: 100%; flex: none; height: auto; position: static; padding: 18px 0; }
-    nav { flex-direction: row; overflow-x: auto; padding: 0 14px; }
-    .brand, .whoami { padding-left: 18px; }
-    .main { padding: 26px 20px 60px; }
-    .quota-grid { grid-template-columns: 1fr; }
-  }
+  .quota-card .of { font-size: 12.5px; color: var(--ink-soft); }
+  .whoami .name { font-family: var(--serif); font-size: 16px; }
+  .whoami { padding: 0 22px 18px; }
+  .whoami .sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+  @media (max-width: 860px) { .quota-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -145,87 +35,121 @@
 
   <aside class="sidebar">
     <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="12" cy="12" r="8.4" opacity=".45"/>
+          <circle cx="12" cy="12" r="4.6"/>
+          <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
+        </svg>
+        <h1>oh-pmt-api</h1>
+      </div>
       <div class="kicker">成员控制台</div>
-      <h1>qoder2api</h1>
     </div>
     <div class="whoami">
       <div class="name" id="who-name">—</div>
       <div class="sub" id="who-sub"></div>
     </div>
-    <nav>
+    <nav id="nav">
       <a href="#usage" data-page="usage" class="active"><span class="ico">◈</span>用量</a>
       <a href="#models" data-page="models"><span class="ico">◇</span>模型</a>
-      <a href="#guide" data-page="guide"><span class="ico">▤</span>接入</a>
+      <a href="#guide" data-page="guide"><span class="ico">⌘</span>接入</a>
       <a href="#" id="logout"><span class="ico">⏻</span>退出登录</a>
     </nav>
+    <div class="sidebar-foot">
+      <div class="theme-toggle" title="切换明暗">
+        <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
+        <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
+      </div>
+    </div>
   </aside>
 
   <main class="main">
 
     <section class="page active" id="page-usage">
       <div class="page-head">
-        <h2>用量</h2>
-        <p>你的积分消耗情况。积分由管理员分配，每天和每周有独立上限。</p>
+        <div>
+          <div class="eyebrow">Usage</div>
+          <h2>用量</h2>
+          <p>你的积分消耗。每日和每周各有独立上限，额度由管理员分配。</p>
+        </div>
       </div>
       <div class="quota-grid" id="quota-grid"></div>
-      <div class="chart-wrap">
-        <h3>近 14 天积分消耗</h3>
-        <div class="bars" id="my-chart"></div>
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">近 14 天 · 积分消耗</span>
+          <span class="spacer"></span>
+          <div class="chart-legend">
+            <span class="li"><span class="sw" style="background:var(--gold)"></span>积分</span>
+          </div>
+        </div>
+        <div id="my-chart"></div>
       </div>
-      <div class="card">
-        <h3>最近调用</h3>
-        <table>
-          <thead><tr><th>时间</th><th>模型</th><th>积分</th><th>Tokens</th></tr></thead>
-          <tbody id="my-recent"></tbody>
-        </table>
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">按模型用量</span></div>
+        <div class="table-wrap"><table id="my-models"></table></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">最近调用</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>模型</th><th class="num">积分</th>
+              <th class="num">Token</th><th>结果</th></tr></thead>
+            <tbody id="my-recent"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <section class="page" id="page-models">
       <div class="page-head">
-        <h2>可用模型</h2>
-        <p>管理员为你开放的模型。请求其他模型会被拒绝。</p>
+        <div>
+          <div class="eyebrow">Models</div>
+          <h2>可用模型</h2>
+          <p>管理员为你开放的模型。请求其他模型会被拒绝。</p>
+        </div>
       </div>
       <div class="card"><div id="model-list"></div></div>
       <div class="card">
-        <h3>密钥限制</h3>
+        <h3 class="section">密钥与限制</h3>
         <div id="key-info"></div>
       </div>
     </section>
 
     <section class="page" id="page-guide">
       <div class="page-head">
-        <h2>接入方式</h2>
-        <p>把下面的地址和密钥填进任意 OpenAI 兼容客户端即可。</p>
-      </div>
-      <div class="card">
-        <h3>接口地址</h3>
-        <div class="codebox" id="api-url">—</div>
-        <h3 style="margin-top:24px">调用示例</h3>
-        <div class="codebox" id="curl-example">—</div>
-        <div class="note">
-          密钥等同于你的账户凭证，不要分享给别人。如果怀疑泄漏，请联系管理员重新生成。
+        <div>
+          <div class="eyebrow">Integration</div>
+          <h2>接入方式</h2>
+          <p>把地址和密钥填进任意 OpenAI 兼容客户端即可。</p>
         </div>
+      </div>
+      <div class="card gold-edge">
+        <h3 class="section">接口地址</h3>
+        <div class="keybox" id="api-url">—</div>
+        <h3 class="section" style="margin-top:20px">调用示例</h3>
+        <div class="keybox" id="curl-example" style="white-space:pre-wrap">—</div>
+        <div class="note">密钥等同于账户凭证，不要分享。怀疑泄漏请联系管理员重新生成。</div>
       </div>
     </section>
 
   </main>
 </div>
 
-<script>
+<script type="module">
+import {
+  initTheme, esc, fmtInt, fmtCompact, lineChart, hbarList, countUp,
+} from '/assets/charts.js';
+
+initTheme();
+
 // 优先用 API Key（SDK 用户直接带 key 访问），否则用登录会话
 const params = new URLSearchParams(location.search);
-const KEY = params.get('key') || localStorage.getItem('q2a_member_key') || '';
-if (KEY) localStorage.setItem('q2a_member_key', KEY);
+const KEY = params.get('key') || localStorage.getItem('ohpmt_member_key') || '';
+if (KEY) localStorage.setItem('ohpmt_member_key', KEY);
 
 let MODEL_NAMES = {};
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const num = (n, d = 2) => Number(n || 0).toFixed(d);
-const int = n => (n || 0).toLocaleString('en-US');
 
 async function api(path) {
-  const headers = KEY ? { 'Authorization': 'Bearer ' + KEY } : {};
+  const headers = KEY ? { Authorization: 'Bearer ' + KEY } : {};
   const res = await fetch(path, { headers, credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
@@ -239,81 +163,103 @@ async function api(path) {
 }
 
 function show(page) {
-  document.querySelectorAll('nav a').forEach(a =>
+  document.querySelectorAll('#nav a').forEach(a =>
     a.classList.toggle('active', a.dataset.page === page));
   document.querySelectorAll('.page').forEach(p =>
     p.classList.toggle('active', p.id === 'page-' + page));
 }
-document.querySelectorAll('nav a').forEach(a => {
-  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); });
-});
+document.querySelectorAll('#nav a[data-page]').forEach(a =>
+  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); }));
 
-function renderBars(el, data, key, fmt) {
-  const max = Math.max(...data.map(d => d[key]), 0.0001);
-  el.innerHTML = data.map(d => {
-    const h = Math.max(2, (d[key] / max) * 120);
-    return `<div class="bar-col" title="${esc(d.date)}: ${fmt(d[key])}">
-      <div class="bar-val">${d[key] > 0 ? esc(fmt(d[key])) : ''}</div>
-      <div class="bar" style="height:${h}px"></div>
-      <div class="bar-lbl">${esc(d.date)}</div>
-    </div>`;
-  }).join('');
-}
+const modelName = id => MODEL_NAMES[id] || id || '未知';
+let DASH = null;
 
 async function load() {
   try {
     const d = await api('/api/me');
+    DASH = d;
+    MODEL_NAMES = {};
+    (d.models || []).forEach(m => { MODEL_NAMES[m.id] = m.name; });
+
     document.getElementById('who-name').textContent = d.member.name;
-    document.getElementById('who-sub').textContent = d.member.email || '';
-    document.title = d.member.name + ' · qoder2api';
+    document.getElementById('who-sub').textContent =
+      d.member.email || d.member.username || '';
+    document.title = d.member.name + ' · oh-pmt-api';
 
     const q = d.quota;
     const card = (label, used, limit, left) => {
       if (!limit) {
         return `<div class="quota-card">
           <div class="label">${label}</div>
-          <div class="big">${num(used)}<small>积分</small></div>
-          <div class="of">不限上限</div>
+          <div class="big"><span data-count="${used}" data-dec="2">0</span><small>积分</small></div>
+          <div class="of">不限上限 · 已用 ${Number(used).toFixed(2)}</div>
         </div>`;
       }
       const pct = Math.min(100, (used / limit) * 100);
       const cls = pct >= 95 ? 'progress err' : pct >= 70 ? 'progress warn' : 'progress';
       return `<div class="quota-card">
         <div class="label">${label}</div>
-        <div class="big">${num(left)}<small>剩余</small></div>
-        <div class="of">已用 ${num(used)} / 上限 ${num(limit)}</div>
-        <div class="${cls}"><div style="width:${pct}%"></div></div>
+        <div class="big"><span data-count="${left}" data-dec="2">0</span><small>剩余</small></div>
+        <div class="of">已用 ${Number(used).toFixed(2)} / 上限 ${Number(limit).toFixed(1)}</div>
+        <div class="${cls}" style="margin-top:12px"><div data-w="${pct.toFixed(1)}"></div></div>
       </div>`;
     };
     document.getElementById('quota-grid').innerHTML =
       card('今日积分', q.used_today, q.limit_daily, q.left_today) +
       card('本周积分', q.used_week, q.limit_weekly, q.left_week);
+    document.querySelectorAll('[data-count]').forEach(n =>
+      countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
+    requestAnimationFrame(() => document.querySelectorAll('.progress > div[data-w]')
+      .forEach(d => { d.style.width = d.dataset.w + '%'; }));
 
-    renderBars(document.getElementById('my-chart'), d.daily, 'credits', v => v.toFixed(2));
+    lineChart(document.getElementById('my-chart'), {
+      labels: (d.daily || []).map(x => x.date),
+      series: [{ name: '积分', color: 'var(--gold)', values: (d.daily || []).map(x => x.credits) }],
+      area: true, height: 200, yFmt: v => Number(v).toFixed(2),
+    });
+
+    // 按模型汇总当前可见的数据
+    const byModel = {};
+    (d.recent || []).forEach(r => {
+      const cell = byModel[r.model] = byModel[r.model] ||
+        { id: r.model, requests: 0, credits: 0, tokens: 0, ok: 0 };
+      cell.requests += 1;
+      cell.credits += Number(r.credits || 0);
+      cell.tokens += Number(r.total_tokens || 0);
+      if (r.status === 200) cell.ok += 1;
+    });
+    hbarList(document.getElementById('my-models'), {
+      rows: Object.values(byModel).sort((a, b) => b.credits - a.credits)
+        .map(m => ({ label: modelName(m.id), value: m.credits })),
+      fmt: v => v.toFixed(3), unit: ' 积分',
+    });
 
     const body = document.getElementById('my-recent');
-    body.innerHTML = d.recent.length ? d.recent.map(r => `<tr>
-      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-      <td>${esc(MODEL_NAMES[r.model] || r.model)}</td>
-      <td class="mono">${num(r.credits, 4)}</td>
-      <td class="mono">${int(r.total_tokens)}</td>
-    </tr>`).join('') : '<tr><td colspan="4" class="empty">还没有调用记录</td></tr>';
+    body.innerHTML = (d.recent || []).length ? d.recent.map(r => `<tr>
+      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
+        { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+      <td>${esc(modelName(r.model))}</td>
+      <td class="num">${Number(r.credits).toFixed(4)}</td>
+      <td class="num">${fmtInt(r.total_tokens)}</td>
+      <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
+        : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">还没有调用记录</td></tr>';
 
-    MODEL_NAMES = {};
-    d.models.forEach(m => { MODEL_NAMES[m.id] = m.name; });
     document.getElementById('model-list').innerHTML = d.models.length
-      ? d.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid #e3e0d6">
+      ? d.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;
+          padding:6px 0;border-bottom:1px solid var(--rule)">
           <span style="min-width:190px">${esc(m.name)}</span>
-          <span class="mono" style="color:var(--ink-faint);font-size:11.5px">${esc(m.id)}</span>
+          <span class="mono" style="color:var(--ink-faint);font-size:11px">${esc(m.id)}</span>
         </div>`).join('')
-      : '<div class="empty">管理员未开放任何模型</div>';
+      : '<div class="empty">管理员还没有为你开放模型</div>';
 
     document.getElementById('key-info').innerHTML = `
-      ${d.member.username ? `<div class="mono">登录账号：${esc(d.member.username)}</div>` : ''}
-      ${d.key.value ? `<div class="mono" style="margin-top:8px;word-break:break-all">${esc(d.key.value)}</div>
-        <div style="margin-top:6px"><button class="copy-btn" data-key="${esc(d.key.value)}">复制密钥</button></div>`
-        : (d.key.prefix ? `<div class="mono" style="margin-top:8px">密钥前缀：${esc(d.key.prefix)}…</div>` : '')}
-      <div class="hint" style="margin-top:10px">允许的来源 IP：${
+      ${d.member.username ? `<div class="kv" style="display:flex;justify-content:space-between;padding:6px 0"><span class="hint">登录账号</span><span class="mono">${esc(d.member.username)}</span></div>` : ''}
+      ${d.key.value ? `<div class="keybox" style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+          <span style="word-break:break-all">${esc(d.key.value)}</span>
+          <button class="small copy-btn" data-key="${esc(d.key.value)}" style="flex:none">复制</button></div>`
+        : (d.key.prefix ? `<div class="mono">密钥前缀：${esc(d.key.prefix)}…</div>` : '')}
+      <div class="hint" style="margin-top:12px">允许的来源 IP：${
         d.key.ip_allowlist ? esc(d.key.ip_allowlist) : '不限制'}</div>
       ${d.preferred_account ? `<div class="hint">优先使用的账号：${esc(d.preferred_account)}</div>` : ''}`;
 
@@ -326,28 +272,40 @@ async function load() {
   -H "Content-Type: application/json" \\
   -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
   } catch (e) {
-    document.getElementById('quota-grid').innerHTML =
-      `<div class="note">${esc(e.message)}</div>`;
+    document.getElementById('quota-grid').innerHTML = `<div class="note">${esc(e.message)}</div>`;
   }
 }
+
 document.addEventListener('click', e => {
   const btn = e.target.closest('.copy-btn');
   if (!btn) return;
   const text = btn.dataset.key;
-  const done = () => { const o = btn.textContent; btn.textContent = '已复制';
-    setTimeout(() => { btn.textContent = o; }, 1400); };
+  const done = () => {
+    const o = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = o; }, 1400);
+  };
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(text).then(done).catch(() => alert(text));
-  } else { alert(text); }
+  } else alert(text);
 });
 
 document.getElementById('logout').addEventListener('click', async e => {
   e.preventDefault();
-  localStorage.removeItem('q2a_member_key');
+  localStorage.removeItem('ohpmt_member_key');
   await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
   location.href = '/login';
 });
 
+document.addEventListener('themechange', () => { if (DASH) load(); });
+
+// 地址栏 hash 直达某一页（刷新后停在同一页）
+const initial = location.hash.replace('#', '');
+if (initial && document.getElementById('page-' + initial)) show(initial);
+addEventListener('hashchange', () => {
+  const page = location.hash.replace('#', '');
+  if (page && document.getElementById('page-' + page)) show(page);
+});
 load();
 </script>
 </body>

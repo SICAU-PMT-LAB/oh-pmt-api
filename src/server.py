@@ -16,18 +16,29 @@ from urllib.parse import parse_qs, urlparse
 import convert
 from qoder import resolve_model
 import guard
+import providers
 import qoder
-from store import Store, day_start
+from store import DEFAULT_MODELS, Store, day_start
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("Q2A_DATA", os.path.join(BASE_DIR, "data"))
-DB_PATH = os.path.join(DATA_DIR, "qoder2api.db")
+DB_PATH = os.path.join(DATA_DIR, "oh-pmt-api.db")
 
 STORE: Store | None = None
+APP_VERSION = "2.0"
 TRUST_FORWARDED = os.environ.get("Q2A_TRUST_FORWARDED", "0") == "1"
 SESSION_COOKIE = "q2a_session"
-# 会话签名密钥：优先用环境变量，否则从数据库文件路径派生（重启后会话仍有效）
-_SESSION_KEY = os.environ.get("Q2A_SESSION_KEY", "").encode() or b"qoder2api-local-session-key"
+# 会话签名密钥：优先用环境变量，否则用固定串（重启后会话仍有效）
+_SESSION_KEY = os.environ.get("Q2A_SESSION_KEY", "").encode() or b"oh-pmt-api-local-session-key"
+
+
+def _mask(secret: str, keep: int = 6) -> str:
+    """凭证展示用的掩码：只留头尾，中间固定长度，不泄露真实长度差。"""
+    if not secret:
+        return ""
+    if len(secret) <= keep * 2:
+        return secret[:2] + "…"
+    return f"{secret[:keep]}…{secret[-4:]}"
 
 
 def _sign(value: str) -> str:
@@ -57,8 +68,24 @@ def get_store() -> Store:
     global STORE
     if STORE is None:
         os.makedirs(DATA_DIR, exist_ok=True)
+        _adopt_old_db()
         STORE = Store(DB_PATH)
     return STORE
+
+
+def _adopt_old_db():
+    """仓库改名前叫 qoder2api，把旧名字的库文件接过来，别让老数据凭空消失。
+
+    只在旧文件存在、新文件不存在时移动；两个都在说明已经迁移过或用户自己放了
+    新库，这时不动任何文件。
+    """
+    legacy = os.path.join(DATA_DIR, "qoder2api.db")
+    if not os.path.exists(legacy) or os.path.exists(DB_PATH):
+        return
+    for suffix in ("", "-wal", "-shm"):
+        src = legacy + suffix
+        if os.path.exists(src):
+            os.replace(src, DB_PATH + suffix)
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +93,15 @@ def get_store() -> Store:
 # ---------------------------------------------------------------------------
 
 def ensure_fresh_token(account: dict) -> dict:
-    """必要时刷新 job token。PAT 换来的令牌只有 24 小时。"""
+    """必要时续期调用凭据。Qoder 的 job token 只有 24 小时。
+
+    不依赖短期凭据的厂商（适配器直接返回空）原样返回账号。
+    """
+    prov = providers.get(account.get("provider"))
     if account["expires_at"] and account["expires_at"] - time.time() > 300:
         return account
+    if not prov.available:
+        raise providers.Unsupported(f"{prov.label} 还没有接入协议")
 
     with _REFRESH_LOCK:
         fresh = get_store().get_account(account["id"])
@@ -77,13 +110,12 @@ def ensure_fresh_token(account: dict) -> dict:
         acc = fresh or account
 
         new = None
-        if acc["refresh_token"]:
-            try:
-                new = qoder.refresh_token(acc["refresh_token"], acc["region"])
-            except qoder.UpstreamError:
-                new = None
+        try:
+            new = prov.refresh(acc)
+        except Exception:  # noqa: BLE001
+            new = None
         if not new or not new.get("access_token"):
-            ex = qoder.exchange_pat(acc["pat"], acc["region"])
+            ex = prov.connect(acc["credential"], acc["region"])
             new = {"access_token": ex["access_token"],
                    "refresh_token": ex["refresh_token"],
                    "expires_in": ex.get("expires_in", 86400)}
@@ -100,10 +132,11 @@ def ensure_fresh_token(account: dict) -> dict:
 
 
 def sync_account_credits(account: dict) -> dict | None:
-    """从上游拉取积分快照并落库。"""
+    """从上游拉取额度快照并落库。厂商不支持额度查询时返回 None。"""
+    prov = providers.get(account.get("provider"))
     try:
         acc = ensure_fresh_token(account)
-        q = qoder.fetch_quota(acc)
+        q = prov.fetch_quota(acc)
     except Exception:  # noqa: BLE001
         return None
     get_store().set_account_credits(
@@ -127,12 +160,13 @@ def checkin_one(account: dict) -> dict:
     实际可能延迟到账、或按人去重后本号不发。
     """
     store = get_store()
+    prov = providers.get(account.get("provider"))
     acc = ensure_fresh_token(account)
     before = None
     if account["credits_synced_at"]:
         before = float(account["credits_remaining"] or 0)
 
-    res = qoder.checkin_account(acc)
+    res = prov.checkin(acc)
 
     # 发放有秒级延迟，刷一次拿到新额度；刷不到就保留原快照
     q = sync_account_credits(account)
@@ -155,31 +189,47 @@ def checkin_one(account: dict) -> dict:
             "quota": q}
 
 
-def models_for_region(region: str, account: dict | None = None) -> list[dict]:
+def models_for_region(region: str, account: dict | None = None,
+                      provider: str = providers.DEFAULT_PROVIDER) -> list[dict]:
+    prov = providers.get(provider)
+    if not prov.available:
+        return []
+    key = f"{prov.slug}:{region}"
     with _MODEL_LOCK:
-        hit = _MODEL_CACHE.get(region)
+        hit = _MODEL_CACHE.get(key)
         if hit and time.time() - hit[0] < 600:
             return hit[1]
     if account is None:
-        account = get_store().pick_account(region)
+        account = get_store().pick_account(region, provider=prov.slug)
     if account is None:
         return []
     try:
         acc = ensure_fresh_token(account)
-        items = qoder.list_models(acc)
+        items = prov.list_models(acc)
     except Exception:  # noqa: BLE001
         return []
+    for m in items:
+        m.setdefault("provider", prov.slug)
     with _MODEL_LOCK:
-        _MODEL_CACHE[region] = (time.time(), items)
+        _MODEL_CACHE[key] = (time.time(), items)
     return items
 
 
 def all_models() -> dict[str, dict]:
     out: dict[str, dict] = {}
-    for region in ("global", "cn"):
-        for m in models_for_region(region):
-            out.setdefault(m["id"], {**m, "region": region})
+    for prov in providers.PROVIDERS.values():
+        if not prov.available:
+            continue
+        for region in prov.regions:
+            for m in models_for_region(region, provider=prov.slug):
+                out.setdefault(m["id"], {**m, "region": region,
+                                         "provider": prov.slug})
     return out
+
+
+def clear_model_cache():
+    with _MODEL_LOCK:
+        _MODEL_CACHE.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +237,7 @@ def all_models() -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "qoder2api"
+    server_version = "oh-pmt-api"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
@@ -353,7 +403,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/accounts":
                 if not self._auth_admin():
                     return
-                return self._send_json(200, {"accounts": self._accounts_view()})
+                return self._send_json(200, {
+                    "accounts": self._accounts_view(),
+                    "providers": providers.describe_all(),
+                })
+            if path.startswith("/api/accounts/"):
+                if not self._auth_admin():
+                    return
+                try:
+                    aid = int(path.rsplit("/", 1)[-1])
+                except ValueError:
+                    return self._error(400, "bad_request", "ID 无效")
+                detail = self._account_detail(aid)
+                if not detail:
+                    return self._error(404, "account_not_found", "账号不存在")
+                return self._send_json(200, detail)
             if path == "/api/members":
                 if not self._auth_admin():
                     return
@@ -395,6 +459,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._auth_admin_page():
                     return
                 return self._serve_html("admin.html")
+            if path.startswith("/accounts/"):
+                if not self._auth_admin_page():
+                    return
+                return self._serve_html("account.html")
+            if path.startswith("/assets/"):
+                return self._serve_static(path)
             if path in ("/console", "/me"):
                 return self._serve_html("console.html")
             if path == "/login":
@@ -445,6 +515,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e.status, e.code, e.message)
         except qoder.UpstreamError as e:
             return self._error(400, "upstream_error", str(e))
+        except providers.Unsupported as e:
+            return self._error(400, "provider_unsupported", str(e))
         except Exception as e:  # noqa: BLE001
             return self._error(500, "internal_error", str(e))
 
@@ -612,13 +684,25 @@ class Handler(BaseHTTPRequestHandler):
             return fail(e.status, e.code, e.message)
 
         stream = bool(body.get("stream"))
-        region = "cn" if model.endswith("-cn") else "global"
+        # 模型目录带上了厂商，路由直接用模型所属厂商；目录里没有这个模型时
+        # 按 Qoder 的命名习惯猜区域，交给 Qoder 适配器处理。
+        meta = catalog.get(model) or {}
+        provider = providers.get(meta.get("provider"))
+        want = meta.get("region") or ("cn" if model.endswith("-cn") else "global")
         prefer = member.get("preferred_account_id") if member else None
-        account = store.pick_account(region, prefer) or store.pick_account(
-            "cn" if region == "global" else "global", prefer
-        )
+        account = store.pick_account(want, provider=provider.slug, prefer_id=prefer)
         if account is None:
-            return fail(503, "no_account", f"{region} 区域没有可用账号")
+            for alt in provider.regions:
+                if alt == want:
+                    continue
+                account = store.pick_account(alt, provider=provider.slug,
+                                             prefer_id=prefer)
+                if account is not None:
+                    break
+        if account is None:
+            return fail(503, "no_account",
+                        f"{provider.label} 的 {provider.region_label(want)} 区域"
+                        f"没有可用账号")
         ctx["account_id"] = account["id"]
 
         try:
@@ -627,14 +711,14 @@ class Handler(BaseHTTPRequestHandler):
                           or body.get("max_completion_tokens") or 8192}
             # 思考档位：客户端传什么由这里的 normalize_effort 对齐到该模型
             # 官方支持的集合，不支持的档位上游会静默忽略、回落默认档
-            effort = qoder.normalize_effort(qoder.requested_effort(body), catalog.get(model))
+            effort = qoder.normalize_effort(qoder.requested_effort(body), meta)
             if effort:
                 parameters["reasoning_effort"] = effort
-            payload = qoder.build_chat_body(
+            payload = provider.build_chat_body(
                 messages, model, stream=True,
                 tools=body.get("tools"),
                 parameters=parameters,
-                meta=catalog.get(model),
+                meta=meta,
             )
             # 上游排队时返回 HTTP 200，但首帧就是 10605 错误信封。
             # 官方客户端会显示"排队中"并继续等；普通客户端只会重试几次就放弃，
@@ -652,7 +736,7 @@ class Handler(BaseHTTPRequestHandler):
             round_no = 0
             tried = {account["id"]}
             while True:
-                lines = qoder.chat_stream(account, payload, model)
+                lines = provider.chat_stream(account, payload, model)
                 first = next(iter(lines), None)
                 frame = first or ""
                 wait = qoder.queue_info(frame)
@@ -661,7 +745,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 先把同区域还没试过的账号试一遍。与排队一样在首帧就发现，
                 # 那时流还没开始写，换账号对客户端是透明的。
                 if wait or qoder.quota_exhausted(frame):
-                    spare = store.pick_account(region, exclude=tried)
+                    spare = store.pick_account(want, provider=provider.slug,
+                                               exclude=tried)
                     if spare is not None:
                         tried.add(spare["id"])
                         account = ensure_fresh_token(spare)
@@ -770,36 +855,80 @@ class Handler(BaseHTTPRequestHandler):
                 ip=ip,
             )
 
+    def _account_detail(self, account_id: int) -> dict:
+        """单个账号的完整信息，账号详情页用。"""
+        store = get_store()
+        acc = store.get_account(account_id)
+        if not acc:
+            return {}
+        prov = providers.get(acc.get("provider"))
+        view = next((a for a in Handler._accounts_view(self) if a["id"] == account_id), {})
+        models = []
+        for mid, m in all_models().items():
+            if m.get("provider") != prov.slug:
+                continue
+            models.append({"id": mid, "name": m.get("name") or mid})
+        models.sort(key=lambda m: m["name"])
+        return {
+            **view,
+            "credential_hint": prov.credential_hint,
+            "credential_url": prov.credential_url,
+            "credential_masked": _mask(acc.get("credential") or ""),
+            "uid": acc["uid"],
+            "created_at": acc["created_at"],
+            "expires_in": max(0, int((acc["expires_at"] or 0) - time.time())),
+            "totals": store.account_totals(account_id),
+            "daily": store.daily_series_for_account(account_id, 14),
+            "recent": store.usage_for_account(account_id, 40),
+            "models": models,
+        }
+
     # ---------------- 管理接口实现 ----------------
 
     def _add_account(self):
         body = self._read_json()
-        pat = (body.get("pat") or "").strip()
-        region = (body.get("region") or "global").strip()
-        if region not in qoder.REGIONS:
-            return self._error(400, "bad_region", "区域只能是 global 或 cn")
-        if not pat.startswith("pt-"):
-            return self._error(400, "bad_pat", "PAT 应以 pt- 开头")
+        prov = providers.get(body.get("provider") or providers.DEFAULT_PROVIDER)
+        credential = (body.get("credential") or body.get("pat") or "").strip()
+        region = (body.get("region") or next(iter(prov.regions))).strip()
+        if not prov.available:
+            return self._error(400, "provider_pending",
+                               f"{prov.label} 的接入协议尚未实现")
+        if region not in prov.regions:
+            return self._error(400, "bad_region",
+                               f"{prov.label} 没有这个区域：{region}")
+        if prov.credential_prefix and not credential.startswith(prov.credential_prefix):
+            return self._error(400, "bad_credential",
+                               f"凭证应以 {prov.credential_prefix} 开头")
+        if not credential:
+            return self._error(400, "bad_credential", "请填写凭证")
 
-        ex = qoder.exchange_pat(pat, region)
-        info = qoder.fetch_userinfo(ex["access_token"], region)
-        if not info["uid"]:
+        try:
+            info = prov.connect(credential, region)
+        except providers.Unsupported:
+            raise
+        except qoder.UpstreamError as e:
+            return self._error(400, "credential_rejected", str(e))
+        if not info.get("uid"):
             return self._error(400, "uid_missing", "无法获取账号 UID")
 
         account_id = get_store().add_account(
-            uid=info["uid"], region=region, pat=pat,
-            email=info["email"], name=info["name"],
+            provider=prov.slug, uid=info["uid"], region=region,
+            credential=credential, email=info.get("email", ""),
+            name=info.get("name", ""),
         )
-        expires_at = time.time() + int(ex.get("expires_in") or 86400)
+        expires_at = time.time() + int(info.get("expires_in") or 86400)
         get_store().set_account_tokens(
-            account_id, ex["access_token"], ex["refresh_token"], expires_at
+            account_id, info.get("access_token", ""),
+            info.get("refresh_token", ""), expires_at
         )
         acc = get_store().get_account(account_id)
         if acc:
             sync_account_credits(acc)
+        clear_model_cache()
         return self._send_json(200, {"ok": True, "account": {
-            "uid": info["uid"], "email": info["email"],
-            "name": info["name"], "region": region,
+            "uid": info["uid"], "email": info.get("email", ""),
+            "name": info.get("name", ""), "region": region,
+            "provider": prov.slug,
         }})
 
     def _account_action(self):
@@ -823,15 +952,22 @@ class Handler(BaseHTTPRequestHandler):
                                          acc["refresh_token"], 0)
         else:
             return self._error(400, "bad_action", "未知操作")
+        clear_model_cache()
         return self._send_json(200, {"ok": True})
 
     def _sync_credits(self):
         body = self._read_json()
-        targets = ([get_store().get_account(int(body["id"]))] if body.get("id")
-                   else get_store().list_accounts())
+        store = get_store()
+        targets = ([store.get_account(int(body["id"]))] if body.get("id")
+                   else store.list_accounts())
         out = []
         for acc in targets:
             if not acc:
+                continue
+            prov = providers.get(acc.get("provider"))
+            if not prov.available:
+                out.append({"id": acc["id"], "ok": False,
+                            "error": f"{prov.label} 暂不支持额度查询"})
                 continue
             q = sync_account_credits(acc)
             out.append({"id": acc["id"], "ok": bool(q), "quota": q})
@@ -849,8 +985,19 @@ class Handler(BaseHTTPRequestHandler):
             targets = [a for a in targets if a]
             if not targets:
                 return self._error(404, "account_not_found", "账号不存在")
+            # 单账号签到也要尊重厂商能力，否则点了只会报错
+            for a in targets:
+                if not providers.get(a.get("provider")).supports_checkin:
+                    return self._error(
+                        400, "no_checkin",
+                        f"{providers.get(a.get('provider')).label} 没有签到活动")
         else:
-            targets = [a for a in store.list_accounts() if a["enabled"]]
+            targets = [a for a in store.list_accounts()
+                       if a["enabled"]
+                       and providers.get(a.get("provider")).supports_checkin]
+            if not targets:
+                return self._send_json(200, {"results": [], "earned": 0,
+                                             "accounts": self._accounts_view()})
 
         results = []
         for acc in targets:
@@ -922,8 +1069,15 @@ class Handler(BaseHTTPRequestHandler):
         out = []
         for a in store.list_accounts():
             st = stats.get(a["id"]) or {}
+            prov = providers.get(a.get("provider"))
             out.append({
                 "id": a["id"], "uid": a["uid"], "region": a["region"],
+                "provider": prov.slug,
+                "provider_label": prov.label,
+                "provider_color": prov.color,
+                "provider_available": prov.available,
+                "supports_checkin": prov.supports_checkin,
+                "region_label": prov.region_label(a["region"]),
                 "email": a["email"], "name": a["name"],
                 "enabled": bool(a["enabled"]),
                 "cooldown": max(0, int(a["cooldown_until"] - time.time())),
@@ -1044,10 +1198,16 @@ class Handler(BaseHTTPRequestHandler):
 
         # 账号归属：每个账号的积分与请求量
         by_account = []
+        account_meta = {a["id"]: a for a in store.list_accounts()}
         for aid, st in store.account_summary().items():
+            meta = account_meta.get(aid) or {}
+            prov = providers.get(meta.get("provider"))
             by_account.append({
                 "id": aid,
                 "name": accounts.get(aid, f"账号 {aid}"),
+                "provider": prov.slug,
+                "provider_label": prov.label,
+                "provider_color": prov.color,
                 "credits": st["credits"],
                 "requests": st["requests"],
                 "tokens": st["tokens"],
@@ -1069,8 +1229,43 @@ class Handler(BaseHTTPRequestHandler):
         } for m in store.model_summary()]
 
         all_time = store.usage_totals(0)
+        # 数据页的图：近 14 天趋势、近 24 小时、模型堆叠、Token 分布、热力图
+        provider_rows = []
+        prov_stats = {p["slug"]: p for p in
+                      Handler._provider_stats(store.list_accounts())}
+        prov_usage = store.provider_summary()
+        account_prov = {a["id"]: a.get("provider", "qoder")
+                        for a in store.list_accounts()}
+        agg: dict[str, dict] = {}
+        for aid, row in prov_usage.items():
+            slug = account_prov.get(aid, "qoder")
+            cell = agg.setdefault(slug, {"credits": 0.0, "requests": 0,
+                                         "ok": 0, "tokens": 0})
+            cell["credits"] += float(row["credits"] or 0)
+            cell["requests"] += int(row["n"] or 0)
+            cell["ok"] += int(row["ok"] or 0)
+            cell["tokens"] += int(row["tokens"] or 0)
+        for slug, cell in agg.items():
+            meta = prov_stats.get(slug) or {}
+            provider_rows.append({
+                "slug": slug,
+                "label": meta.get("label", slug),
+                "color": meta.get("color", "#8b6b2f"),
+                "credits": round(cell["credits"], 4),
+                "requests": cell["requests"],
+                "tokens": cell["tokens"],
+                "success_rate": (round(cell["ok"] * 100.0 / cell["requests"], 2)
+                                 if cell["requests"] else None),
+            })
+        provider_rows.sort(key=lambda r: r["credits"], reverse=True)
+
         return {
             "daily": store.daily_series(14),
+            "hourly": store.hourly_series(24),
+            "model_pivot": store.models_pivot(14),
+            "token_hist": store.token_distribution(),
+            "heatmap": store.usage_heatmap(14),
+            "by_provider": provider_rows,
             "by_model": by_model,
             "by_member": per_member,
             "by_account": by_account,
@@ -1091,6 +1286,13 @@ class Handler(BaseHTTPRequestHandler):
         accounts = store.list_accounts()
         members = store.list_members()
         models = all_models() if accounts else {}
+        # 上游目录读不到时（账号刚接入还没同步、或全部在冷却），成员页仍然要能
+        # 配置模型，所以退回默认的那几个档位并标记为 provisional。
+        provisional = False
+        if not models:
+            provisional = True
+            models = {mid: {"name": mid, "provider": providers.DEFAULT_PROVIDER}
+                      for mid in DEFAULT_MODELS.split(",") if mid}
         today = store.usage_totals(day_start())
         all_time = store.usage_totals(0)
         return {
@@ -1099,9 +1301,13 @@ class Handler(BaseHTTPRequestHandler):
                              if a["enabled"] and a["cooldown_until"] < time.time()),
             "members": len(members),
             "keys": len(store.list_keys()),
-            "models": [{"id": mid, "name": models[mid].get("name") or mid}
+            "models": [{"id": mid, "name": models[mid].get("name") or mid,
+                        "provider": models[mid].get("provider", "qoder")}
                        for mid in sorted(models)],
             "model_ids": sorted(models),
+            "models_provisional": provisional,
+            "providers": providers.describe_all(),
+            "provider_stats": self._provider_stats(accounts),
             "credits_remaining": round(
                 sum(a["credits_remaining"] for a in accounts), 2),
             "credits_total": round(sum(a["credits_total"] for a in accounts), 2),
@@ -1109,8 +1315,31 @@ class Handler(BaseHTTPRequestHandler):
             # 请求量 / Token / 积分 · 成功率
             "today": today,
             "all_time": all_time,
-            "checkin_pending": sum(1 for a in accounts if not a["checkin_at"]),
+            "checkin_pending": sum(1 for a in accounts if not a["checkin_at"]
+                                   and providers.get(a["provider"]).supports_checkin),
         }
+
+    @staticmethod
+    def _provider_stats(accounts: list[dict]) -> list[dict]:
+        """按厂商聚合账号数、可用数、额度，供账号页的厂商卡片用。"""
+        now = time.time()
+        out = []
+        for prov in providers.PROVIDERS.values():
+            rows = [a for a in accounts if a.get("provider") == prov.slug]
+            total = sum(float(a["credits_total"] or 0) for a in rows)
+            remaining = sum(float(a["credits_remaining"] or 0) for a in rows)
+            out.append({
+                **prov.describe(),
+                "accounts": len(rows),
+                # 别用 available：describe() 里那个是同名字段表示「协议已实现」
+                "available_accounts": sum(1 for a in rows
+                                          if a["enabled"] and a["cooldown_until"] < now),
+                "credits_total": round(total, 2),
+                "credits_remaining": round(remaining, 2),
+                "credits_used": round(sum(float(a["credits_used"] or 0)
+                                          for a in rows), 2),
+            })
+        return out
 
     def _member_dashboard(self, ctx: dict) -> dict:
         store = get_store()
@@ -1164,6 +1393,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         return False
 
+    # 静态资源：只发 web/assets 下的已知扩展名，路径里不允许出现 ".."
+    STATIC_TYPES = {
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".woff2": "font/woff2",
+    }
+
+    def _serve_static(self, path: str):
+        rel = path[len("/assets/"):]
+        if not rel or ".." in rel or rel.startswith("/"):
+            return self._error(404, "not_found", "资源不存在")
+        full = os.path.join(BASE_DIR, "web", "assets", rel)
+        ext = os.path.splitext(full)[1].lower()
+        if ext not in self.STATIC_TYPES or not os.path.isfile(full):
+            return self._error(404, "not_found", "资源不存在")
+        with open(full, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", self.STATIC_TYPES[ext])
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_html(self, filename: str):
         path = os.path.join(BASE_DIR, "web", filename)
         if not os.path.exists(path):
@@ -1173,6 +1428,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        # 页面会随版本改动，浏览器启发式缓存会让人看到旧界面
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1183,7 +1440,7 @@ def main():
     get_store()
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-    print(f"qoder2api 监听 http://{host}:{port}")
+    print(f"oh-pmt-api v{APP_VERSION} 监听 http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

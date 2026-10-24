@@ -12,11 +12,14 @@ from contextlib import contextmanager
 TABLES = """
 CREATE TABLE IF NOT EXISTS accounts (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- 账号来源厂商：qoder / workbuddy / cline / commandcode
+    provider        TEXT NOT NULL DEFAULT 'qoder',
     uid             TEXT NOT NULL,
     region          TEXT NOT NULL,
     email           TEXT DEFAULT '',
     name            TEXT DEFAULT '',
-    pat             TEXT NOT NULL,
+    -- 长期凭证：Qoder 是 pt- 开头的 PAT，其他厂商是各自的 API Key
+    credential      TEXT NOT NULL,
     access_token    TEXT DEFAULT '',
     refresh_token   TEXT DEFAULT '',
     expires_at      REAL DEFAULT 0,
@@ -42,13 +45,14 @@ CREATE TABLE IF NOT EXISTS accounts (
     credits_exceeded INTEGER DEFAULT 0,
     plan_name       TEXT DEFAULT '',
     credits_synced_at REAL DEFAULT 0,
-    -- 最近一次签到结果
+    -- 最近一次签到结果（目前只有 Qoder 有签到活动）
     checkin_at      REAL DEFAULT 0,
     checkin_ok      INTEGER DEFAULT 0,
     checkin_earned  REAL DEFAULT 0,
     checkin_message TEXT DEFAULT '',
     created_at      REAL NOT NULL,
-    UNIQUE(uid, region)
+    -- 同一厂商下同一个 uid 在同一个区域只算一个账号
+    UNIQUE(provider, uid, region)
 );
 
 CREATE TABLE IF NOT EXISTS members (
@@ -119,6 +123,16 @@ CREATE INDEX IF NOT EXISTS idx_usage_time ON usage(created_at);
 DEFAULT_MODELS = "qfmodel,gfmodel,dfmodel"
 
 
+def _short_num(value) -> str:
+    """图表刻度用的紧凑写法：1200 → 1.2k，64000 → 64k。"""
+    v = float(value or 0)
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:g}M"
+    if v >= 1000:
+        return f"{v / 1000:g}k"
+    return f"{v:g}"
+
+
 def day_start(ts: float | None = None) -> float:
     """当天 00:00 的时间戳（本地时区）。"""
     t = time.localtime(ts if ts is not None else time.time())
@@ -163,8 +177,93 @@ class Store:
         def columns(table: str) -> set[str]:
             return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
 
-        # accounts 新增积分快照列
+        # accounts 新增积分快照列 / 厂商列
         acc_cols = columns("accounts")
+        # 老库是单厂商的：pat 列改名为 credential，再补 provider 并换成
+        # (provider, uid, region) 唯一约束。SQLite 改不了约束，只能重建表。
+        # 两种老版本都要接：最初的库只有基础列，后来的库多了积分快照列。
+        if "provider" not in acc_cols or "credential" not in acc_cols:
+            leg = "pat"
+            # 源列：credential 来自 pat（或已是 credential），provider 固定 'qoder'，
+            # 其他列老库里没有就用默认值 0 / ''。
+            src = (("id", "id"), ("uid", "uid"), ("region", "region"),
+                   ("email", "email"), ("name", "name"),
+                   ("credential", leg if leg in acc_cols else "''"),
+                   ("access_token", "access_token"),
+                   ("refresh_token", "refresh_token"),
+                   ("expires_at", "expires_at"), ("enabled", "enabled"),
+                   ("last_error", "last_error"),
+                   ("last_used_at", "last_used_at"),
+                   ("cooldown_until", "cooldown_until"),
+                   ("credits_total", "credits_total"),
+                   ("credits_used", "credits_used"),
+                   ("credits_remaining", "credits_remaining"),
+                   ("credits_addon", "credits_addon"),
+                   ("credits_base_total", "credits_base_total"),
+                   ("credits_base_used", "credits_base_used"),
+                   ("credits_base_remaining", "credits_base_remaining"),
+                   ("credits_addon_total", "credits_addon_total"),
+                   ("credits_addon_used", "credits_addon_used"),
+                   ("credits_shared_total", "credits_shared_total"),
+                   ("credits_shared_used", "credits_shared_used"),
+                   ("credits_shared_remaining", "credits_shared_remaining"),
+                   ("credits_expire_at", "credits_expire_at"),
+                   ("credits_exceeded", "credits_exceeded"),
+                   ("plan_name", "plan_name"),
+                   ("credits_synced_at", "credits_synced_at"),
+                   ("checkin_at", "checkin_at"),
+                   ("checkin_ok", "checkin_ok"),
+                   ("checkin_earned", "checkin_earned"),
+                   ("checkin_message", "checkin_message"),
+                   ("created_at", "created_at"))
+            targets = "provider, " + ", ".join(t for t, _ in src)
+            sources = "'qoder', " + ", ".join(
+                s if s in acc_cols or s == "''" else "0" for _, s in src)
+            c.executescript(f"""
+            ALTER TABLE accounts RENAME TO accounts_legacy;
+            CREATE TABLE accounts (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider        TEXT NOT NULL DEFAULT 'qoder',
+                uid             TEXT NOT NULL,
+                region          TEXT NOT NULL,
+                email           TEXT DEFAULT '',
+                name            TEXT DEFAULT '',
+                credential      TEXT NOT NULL DEFAULT '',
+                access_token    TEXT DEFAULT '',
+                refresh_token   TEXT DEFAULT '',
+                expires_at      REAL DEFAULT 0,
+                enabled         INTEGER DEFAULT 1,
+                last_error      TEXT DEFAULT '',
+                last_used_at    REAL DEFAULT 0,
+                cooldown_until  REAL DEFAULT 0,
+                credits_total   REAL DEFAULT 0,
+                credits_used    REAL DEFAULT 0,
+                credits_remaining REAL DEFAULT 0,
+                credits_addon   REAL DEFAULT 0,
+                credits_base_total REAL DEFAULT 0,
+                credits_base_used REAL DEFAULT 0,
+                credits_base_remaining REAL DEFAULT 0,
+                credits_addon_total REAL DEFAULT 0,
+                credits_addon_used REAL DEFAULT 0,
+                credits_shared_total REAL DEFAULT 0,
+                credits_shared_used REAL DEFAULT 0,
+                credits_shared_remaining REAL DEFAULT 0,
+                credits_expire_at REAL DEFAULT 0,
+                credits_exceeded INTEGER DEFAULT 0,
+                plan_name       TEXT DEFAULT '',
+                credits_synced_at REAL DEFAULT 0,
+                checkin_at      REAL DEFAULT 0,
+                checkin_ok      INTEGER DEFAULT 0,
+                checkin_earned  REAL DEFAULT 0,
+                checkin_message TEXT DEFAULT '',
+                created_at      REAL NOT NULL,
+                UNIQUE(provider, uid, region)
+            );
+            INSERT INTO accounts ({targets})
+            SELECT {sources} FROM accounts_legacy;
+            DROP TABLE accounts_legacy;
+            """)
+            acc_cols = columns("accounts")
         for name, decl in (
             ("credits_total", "REAL DEFAULT 0"),
             ("credits_used", "REAL DEFAULT 0"),
@@ -223,40 +322,51 @@ class Store:
 
     # ---------------- 账号 ----------------
 
-    def add_account(self, *, uid, region, pat, email="", name="") -> int:
+    def add_account(self, *, uid, region, credential, provider="qoder",
+                    email="", name="") -> int:
         with self._conn() as c:
             cur = c.execute(
-                """INSERT INTO accounts (uid, region, pat, email, name, created_at)
-                   VALUES (?,?,?,?,?,?)
-                   ON CONFLICT(uid, region) DO UPDATE SET
-                     pat=excluded.pat, email=excluded.email, name=excluded.name,
-                     last_error='', cooldown_until=0""",
-                (uid, region, pat, email, name, time.time()),
+                """INSERT INTO accounts (provider, uid, region, credential, email,
+                     name, created_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(provider, uid, region) DO UPDATE SET
+                     credential=excluded.credential, email=excluded.email,
+                     name=excluded.name, last_error='', cooldown_until=0""",
+                (provider, uid, region, credential, email, name, time.time()),
             )
             if cur.lastrowid:
                 return cur.lastrowid
             row = c.execute(
-                "SELECT id FROM accounts WHERE uid=? AND region=?", (uid, region)
+                "SELECT id FROM accounts WHERE provider=? AND uid=? AND region=?",
+                (provider, uid, region),
             ).fetchone()
             return int(row["id"])
 
-    def list_accounts(self, region: str | None = None) -> list[dict]:
+    def list_accounts(self, region: str | None = None,
+                      provider: str | None = None) -> list[dict]:
         with self._conn() as c:
             sql = "SELECT * FROM accounts"
-            args: tuple = ()
+            args: list = []
+            where = []
             if region:
-                sql += " WHERE region=?"
-                args = (region,)
-            return [dict(r) for r in c.execute(sql + " ORDER BY id", args)]
+                where.append("region=?")
+                args.append(region)
+            if provider:
+                where.append("provider=?")
+                args.append(provider)
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            return [dict(r) for r in c.execute(sql + " ORDER BY id", tuple(args))]
 
     def get_account(self, account_id: int) -> dict | None:
         with self._conn() as c:
             r = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
             return dict(r) if r else None
 
-    def pick_account(self, region: str, prefer_id: int | None = None,
+    def pick_account(self, region: str, provider: str = "qoder",
+                     prefer_id: int | None = None,
                      exclude: set[int] | None = None) -> dict | None:
-        """选账号：优先指定的那个，不可用时回退到同区域最久未用的。
+        """选账号：优先指定的那个，不可用时回退到同厂商同区域最久未用的。
 
         exclude 里的账号会被跳过，用于一个账号排队时换到别的账号重试。
         """
@@ -265,15 +375,15 @@ class Store:
         with self._conn() as c:
             if prefer_id and prefer_id not in skip:
                 r = c.execute(
-                    """SELECT * FROM accounts WHERE id=? AND region=? AND enabled=1
-                       AND cooldown_until < ?""",
-                    (prefer_id, region, now),
+                    """SELECT * FROM accounts WHERE id=? AND provider=? AND region=?
+                       AND enabled=1 AND cooldown_until < ?""",
+                    (prefer_id, provider, region, now),
                 ).fetchone()
                 if r:
                     return dict(r)
-            sql = ("SELECT * FROM accounts "
-                   "WHERE region=? AND enabled=1 AND cooldown_until < ?")
-            args = [region, now]
+            sql = ("SELECT * FROM accounts WHERE provider=? AND region=? "
+                   "AND enabled=1 AND cooldown_until < ?")
+            args = [provider, region, now]
             if skip:
                 sql += " AND id NOT IN (%s)" % ",".join("?" * len(skip))
                 args.extend(skip)
@@ -648,12 +758,121 @@ class Store:
                 ).fetchone()
             out.append({
                 "date": time.strftime("%m-%d", time.localtime(start)),
+                "ts": start,
                 "requests": int(r["n"]),
                 "errors": int(r["err"] or 0),
                 "credits": round(float(r["c"]), 4),
                 "tokens": int(r["t"]),
             })
         return out
+
+    # ---------------- 数据页的图表口径 ----------------
+
+    def hourly_series(self, hours: int = 24) -> list[dict]:
+        """最近 N 小时的请求量，按整点分桶。"""
+        now = time.time()
+        base = now - (int(now) % 3600)
+        out = []
+        for i in range(hours - 1, -1, -1):
+            start = base - i * 3600
+            end = start + 3600
+            with self._conn() as c:
+                r = c.execute(
+                    """SELECT COUNT(*) n,
+                         SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                         COALESCE(SUM(credits),0) c,
+                         COALESCE(SUM(total_tokens),0) t FROM usage
+                       WHERE created_at>=? AND created_at<?""", (start, end)
+                ).fetchone()
+            out.append({
+                "hour": time.strftime("%H:00", time.localtime(start)),
+                "requests": int(r["n"]),
+                "errors": int(r["err"] or 0),
+                "credits": round(float(r["c"]), 4),
+                "tokens": int(r["t"]),
+            })
+        return out
+
+    def models_pivot(self, days: int = 14) -> dict:
+        """按模型 × 日期交叉的请求量，给堆叠面积图用。
+
+        只保留请求量最高的 5 个模型，其余并成「其他」，否则图例会挤满。
+        """
+        start = day_start(time.time() - (days - 1) * 86400)
+        with self._conn() as c:
+            totals = c.execute(
+                """SELECT model, COUNT(*) n FROM usage WHERE created_at>=?
+                   GROUP BY model ORDER BY n DESC""", (start,)
+            ).fetchall()
+            rows = c.execute(
+                """SELECT model, CAST((created_at-?)/86400 AS INTEGER) d,
+                     COUNT(*) n FROM usage WHERE created_at>=?
+                   GROUP BY model, d""", (start, start)
+            ).fetchall()
+        keep = [t["model"] or "" for t in totals[:5]]
+        labels = [time.strftime("%m-%d", time.localtime(start + i * 86400))
+                  for i in range(days)]
+        series = {m: [0] * days for m in keep}
+        if len(totals) > 5:
+            series["其他"] = [0] * days
+        for r in rows:
+            d = int(r["d"])
+            if not 0 <= d < days:
+                continue
+            key = r["model"] or ""
+            if key not in series:
+                key = "其他"
+            series[key][d] += int(r["n"])
+        return {"labels": labels,
+                "series": [{"model": m, "values": v} for m, v in series.items()]}
+
+    def token_distribution(self, since: float = 0) -> list[dict]:
+        """单次请求的 Token 分布（直方图）。"""
+        edges = [0, 1000, 4000, 16000, 64000, 256000]
+        out = []
+        with self._conn() as c:
+            for i, lo in enumerate(edges):
+                hi = edges[i + 1] if i + 1 < len(edges) else None
+                if hi is None:
+                    r = c.execute(
+                        "SELECT COUNT(*) n FROM usage WHERE created_at>=? "
+                        "AND total_tokens>=?", (since, lo)).fetchone()
+                    label = f"≥{_short_num(lo)}"
+                else:
+                    r = c.execute(
+                        "SELECT COUNT(*) n FROM usage WHERE created_at>=? "
+                        "AND total_tokens>=? AND total_tokens<?",
+                        (since, lo, hi)).fetchone()
+                    label = f"{_short_num(lo)}–{_short_num(hi)}"
+                out.append({"label": label, "count": int(r["n"])})
+        return out
+
+    def usage_heatmap(self, days: int = 14) -> dict:
+        """星期 × 小时 的请求热力图，用来看使用习惯。"""
+        start = day_start(time.time() - (days - 1) * 86400)
+        grid = [[0] * 24 for _ in range(7)]
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT created_at FROM usage WHERE created_at>=?", (start,)
+            ).fetchall()
+        for r in rows:
+            t = time.localtime(r["created_at"])
+            grid[t.tm_wday][t.tm_hour] += 1
+        return {"grid": grid,
+                "weekdays": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]}
+
+    def provider_summary(self, since: float = 0) -> dict[int, dict]:
+        """按账号归属汇总，带上账号所属厂商的聚合，供数据页分组。"""
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT account_id, COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     COALESCE(SUM(credits),0) credits,
+                     COALESCE(SUM(total_tokens),0) tokens
+                   FROM usage WHERE created_at>=? AND account_id IS NOT NULL
+                   GROUP BY account_id""", (since,))
+            return {int(r["account_id"]): dict(r) for r in rows}
+
 
     def member_summary(self, since: float | None = None) -> list[dict]:
         since = since if since is not None else time.time() - 7 * 86400
@@ -684,6 +903,60 @@ class Store:
                 (member_id, since),
             )
             return [dict(r) for r in rows]
+
+    def usage_for_account(self, account_id: int, limit: int = 50) -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM usage WHERE account_id=? ORDER BY id DESC LIMIT ?",
+                (account_id, limit))
+            return [dict(r) for r in rows]
+
+    def daily_series_for_account(self, account_id: int, days: int = 14) -> list[dict]:
+        """单个账号最近 N 天的请求量与积分。"""
+        out = []
+        now = time.time()
+        for i in range(days - 1, -1, -1):
+            start = day_start(now - i * 86400)
+            end = start + 86400
+            with self._conn() as c:
+                r = c.execute(
+                    """SELECT COUNT(*) n,
+                         SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                         COALESCE(SUM(credits),0) c,
+                         COALESCE(SUM(total_tokens),0) t FROM usage
+                       WHERE account_id=? AND created_at>=? AND created_at<?""",
+                    (account_id, start, end)).fetchone()
+            out.append({
+                "date": time.strftime("%m-%d", time.localtime(start)),
+                "requests": int(r["n"]),
+                "errors": int(r["err"] or 0),
+                "credits": round(float(r["c"]), 4),
+                "tokens": int(r["t"]),
+            })
+        return out
+
+    def account_totals(self, account_id: int) -> dict:
+        """单个账号的网关记账合计：请求、成功、失败、Token 入/出、积分。"""
+        with self._conn() as c:
+            r = c.execute(
+                """SELECT COUNT(*) n,
+                     SUM(CASE WHEN status=200 THEN 1 ELSE 0 END) ok,
+                     SUM(CASE WHEN status=200 THEN 0 ELSE 1 END) err,
+                     COALESCE(SUM(prompt_tokens),0) pin,
+                     COALESCE(SUM(completion_tokens),0) pout,
+                     COALESCE(SUM(total_tokens),0) tokens,
+                     COALESCE(SUM(credits),0) credits
+                   FROM usage WHERE account_id=?""", (account_id,)).fetchone()
+        n = int(r["n"] or 0)
+        ok = int(r["ok"] or 0)
+        return {
+            "requests": n, "ok": ok, "errors": int(r["err"] or 0),
+            "success_rate": round(ok * 100.0 / n, 2) if n else None,
+            "prompt_tokens": int(r["pin"] or 0),
+            "completion_tokens": int(r["pout"] or 0),
+            "tokens": int(r["tokens"] or 0),
+            "credits": round(float(r["credits"] or 0), 4),
+        }
 
     def recent_usage(self, limit: int = 50) -> list[dict]:
         with self._conn() as c:

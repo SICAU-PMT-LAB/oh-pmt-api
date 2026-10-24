@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 启动 qoder2api。首次运行会自动生成管理令牌并打印出来。
+# 启动 oh-pmt-api。首次运行会自动生成管理令牌并打印出来。
 set -eu
 cd "$(dirname "$0")"
 
@@ -16,5 +16,5 @@ if [ -z "${Q2A_ADMIN_TOKEN:-}" ]; then
 fi
 
 PORT="${Q2A_PORT:-8791}"
-echo "管理界面： http://127.0.0.1:${PORT}/?token=${Q2A_ADMIN_TOKEN}"
+echo "管理界面： http://127.0.0.1:${PORT}/"
 exec python3 src/server.py

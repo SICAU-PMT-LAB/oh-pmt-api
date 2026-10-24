@@ -1,6 +1,10 @@
-# qoder2api
+# oh-pmt-api
 
-把 Qoder 账号的订阅额度封装成 OpenAI 兼容 API，通过 API Key 分发给多人使用，并支持按 Key 限制 token 用量、IP 来源和模型。
+把订阅制 AI 账号的额度封装成 OpenAI 兼容 API，通过 API Key 分发给多人使用，并支持按 Key 限制积分用量、IP 来源和模型。
+
+账号来源按厂商建模（`src/providers.py`）。Qoder 是当前唯一实现完整协议的厂商，
+文档里这部分协议细节仍然有效；WorkBuddy / Cline / CommandCode 注册为待接入，
+新增一家只需要在注册表里补一个适配器。
 
 ## 为什么做这个
 
@@ -78,6 +82,7 @@ AES key 只有 64 bit 熵且 key == IV，RSA 公钥实测 1024 位。`qoder_sign
 
 做：
 
+- 多厂商账号模型：账号带 provider 列，调度不会跨厂商
 - PAT 导入多个 Qoder 账号（国际版 / 国内版分别管理）
 - 账号池轮询、故障冷却换号、token 自动刷新
 - 生成 API Key 分发给多人

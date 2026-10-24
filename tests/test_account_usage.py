@@ -152,7 +152,7 @@ class CheckinEarnedTest(unittest.TestCase):
         self.patch.start()
         self.patch2 = mock.patch.object(server, "ensure_fresh_token", lambda a: a)
         self.patch2.start()
-        self.aid = self.store.add_account(uid="u1", region="global", pat="pt-a",
+        self.aid = self.store.add_account(uid="u1", region="global", credential="pt-a",
                                           name="A")
 
     def tearDown(self):
@@ -209,7 +209,7 @@ class UsageStatsTest(unittest.TestCase):
         self.store = Store(self.tmp.name)
         self.mid = self.store.create_member(name="张三")
         self.kid, _ = self.store.create_key(member_id=self.mid)
-        self.store.add_account(uid="u1", region="global", pat="pt-a")
+        self.store.add_account(uid="u1", region="global", credential="pt-a")
 
     def tearDown(self):
         os.unlink(self.tmp.name)
@@ -273,7 +273,7 @@ class AccountViewTest(unittest.TestCase):
         self.store = Store(self.tmp.name)
         self.patch = mock.patch.object(server, "get_store", lambda: self.store)
         self.patch.start()
-        self.account_id = self.store.add_account(uid="u1", region="global", pat="pt-a")
+        self.account_id = self.store.add_account(uid="u1", region="global", credential="pt-a")
 
     def tearDown(self):
         self.patch.stop()
@@ -317,7 +317,7 @@ class MemberViewTest(unittest.TestCase):
         self.patch.start()
         self.mid = self.store.create_member(name="张三")
         self.kid, _ = self.store.create_key(member_id=self.mid)
-        self.store.add_account(uid="u1", region="global", pat="pt-a")
+        self.store.add_account(uid="u1", region="global", credential="pt-a")
 
     def tearDown(self):
         self.patch.stop()
@@ -351,7 +351,7 @@ class AnalyticsTotalsTest(unittest.TestCase):
             p.start()
         self.mid = self.store.create_member(name="张三")
         self.kid, _ = self.store.create_key(member_id=self.mid)
-        self.store.add_account(uid="u1", region="global", pat="pt-a")
+        self.store.add_account(uid="u1", region="global", credential="pt-a")
 
     def tearDown(self):
         for p in self.patches:

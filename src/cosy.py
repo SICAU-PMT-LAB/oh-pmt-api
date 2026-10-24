@@ -309,12 +309,16 @@ def build_cosy_headers(
 # ---------------------------------------------------------------------------
 
 def derive_machine_id(uid: str, salt: str = "qoder2api:mid") -> str:
-    """派生带连字符的 UUIDv4 形状，与官方客户端 machineId 同形。"""
+    """派生带连字符的 UUIDv4 形状，与官方客户端 machineId 同形。
+
+    盐固定用 qoder2api 前缀：仓库改名不能改变已接入账号的设备指纹。
+    """
     h = hashlib.md5(f"{salt}:{uid}".encode()).hexdigest()
     return f"{h[0:8]}-{h[8:12]}-4{h[13:16]}-a{h[17:20]}-{h[20:32]}"
 
 
 def derive_machine_token(uid: str, salt: str = "qoder2api:mtok") -> str:
+    """同上，盐是设备指纹的一部分，不能随仓库改名而变。"""
     return hashlib.md5(f"{salt}:{uid}".encode()).hexdigest()
 
 
