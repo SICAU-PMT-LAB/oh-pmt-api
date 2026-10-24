@@ -675,10 +675,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._stream_queue_notice(round_no, wait, left)
                 time.sleep(min(wait, max(1, left)))
 
-            def _replay():
-                if first is not None:
-                    yield first
-                yield from lines
+            # 首帧已经被取出来判断过是否排队，要放回流的开头。
+            # 这里必须用默认参数固定住上游迭代器：写成闭包直接引用 lines
+            # 会被下面那句 lines = _replay() 重新绑定成 _replay 自身，
+            # 于是 yield from 迭代到自己身上，抛 ValueError: generator already executing
+            def _replay(upstream=lines, head=first):
+                if head is not None:
+                    yield head
+                yield from upstream
 
             lines = _replay()
         except qoder.UpstreamError as e:
