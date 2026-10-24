@@ -693,7 +693,7 @@ async function loadOverview() {
       <div class="stat"><div class="num">${int(t.requests)}</div>
         <div class="lbl">今日请求 · 成功 ${pctLabel(t.success_rate)}</div></div>
       <div class="stat"><div class="num">${int(t.tokens)}</div>
-        <div class="lbl">今日 Token · ${num(t.credits, 3)} 积分</div></div>
+        <div class="lbl">今日 Token · 消耗 ${num(t.credits, 3)} 积分</div></div>
       <div class="stat"><div class="num">${s.available}<small>/${s.accounts}</small></div><div class="lbl">可用账号</div></div>
       <div class="stat"><div class="num">${s.members}</div><div class="lbl">成员 · ${s.keys} 个密钥</div></div>`;
 
@@ -952,7 +952,7 @@ async function loadAccounts() {
         <td class="mono" style="min-width:150px">${num(a.credits_remaining, 1)}
           <span style="color:var(--ink-faint)">/ ${num(a.credits_total, 0)}</span>
           <div class="progress"><div style="width:${pct}%"></div></div>
-          <div class="sub">已用 ${num(a.credits_used, 1)} · ${expire}${a.credits_exceeded ? ' · <span style="color:var(--err)">额度耗尽</span>' : ''}</div></td>
+          <div class="sub">已用 ${num(a.credits_used, 1)} · ${expire}${a.credits_exceeded && a.credits_total > 0 ? ' · <span style="color:var(--err)">额度耗尽</span>' : ''}${a.credits_total <= 0 ? ' · <span style="color:var(--ink-faint)">无可用额度</span>' : ''}</div></td>
         <td class="wrap" style="font-size:12.5px"><span class="mono">
             套餐 ${num(a.credits_base_remaining, 0)}/${num(a.credits_base_total, 0)}<br>
             赠送 ${num(a.credits_addon_remaining, 0)}/${num(a.credits_addon_total, 0)}
