@@ -151,16 +151,21 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- 基础工具 ----------------
 
-    def _send_json(self, status: int, payload):
+    def _send_json(self, status: int, payload, extra_headers: dict | None = None):
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
-    def _error(self, status: int, code: str, message: str):
-        self._send_json(status, {"error": {"code": code, "message": message}})
+    def _error(self, status: int, code: str, message: str, retry_after: int = 0):
+        extra = {"Retry-After": str(retry_after)} if retry_after else None
+        self._send_json(status, {"error": {"code": code, "message": message,
+                                           "type": code}},
+                        extra_headers=extra)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -536,7 +541,29 @@ class Handler(BaseHTTPRequestHandler):
                 parameters={"max_tokens": body.get("max_tokens") or 8192},
             )
             lines = qoder.chat_stream(account, payload, model)
+            # 上游排队时返回 HTTP 200，但首帧就是 10605 错误信封。
+            # 先取首帧检查，把排队挡在开流之前，避免先回 200 再在流里报错。
+            first = next(iter(lines), None)
+            queued = qoder.queue_info(first or "")
+            if queued:
+                return self._error(429, "upstream_busy",
+                                   "上游模型繁忙，请稍后重试",
+                                   retry_after=queued)
+
+            def _replay():
+                if first is not None:
+                    yield first
+                yield from lines
+
+            lines = _replay()
         except qoder.UpstreamError as e:
+            if e.is_queued:
+                # 模型侧排队，账号没问题，不要冷却，让客户端稍后重试
+                return self._error(429, "upstream_busy",
+                                   "上游模型繁忙，请稍后重试", retry_after=e.retry_after())
+            if e.is_rate_limited:
+                return self._error(429, "upstream_rate_limited",
+                                   "上游限流，请稍后重试", retry_after=e.retry_after())
             store.set_account_cooldown(account["id"], 60, str(e))
             return self._error(502, "upstream_error", str(e))
 

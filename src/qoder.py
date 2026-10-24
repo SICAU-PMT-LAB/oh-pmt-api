@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -42,16 +43,35 @@ class UpstreamError(Exception):
         super().__init__(message or f"upstream {status}: {body[:200]}")
 
     @property
+    def is_queued(self) -> bool:
+        """上游模型排队限流（10605）。
+
+        排队时上游也返回 403，但这不是凭证问题，账号完全正常，
+        只是模型侧资源紧张，稍后重试即可，不能触发账号冷却。
+        """
+        return "10605" in self.body or '"isQueued":true' in self.body
+
+    @property
     def is_auth_dead(self) -> bool:
         """凭证失效，需要重新用 PAT 换 token。"""
-        return self.status in (401, 403) or any(
-            k in self.body
-            for k in ("TOKEN_EXPIRE", "12153", "Offline user session not found")
-        )
+        if self.is_queued:
+            return False
+        if any(k in self.body for k in
+               ("TOKEN_EXPIRE", "12153", "Offline user session not found")):
+            return True
+        return self.status == 401
 
     @property
     def is_rate_limited(self) -> bool:
-        return self.status == 429
+        return self.status == 429 or self.is_queued
+
+    def retry_after(self) -> int:
+        """上游要求等待的秒数，拿不到就给 30。"""
+        import re
+        m = re.search(r"retryAfterSeconds\\\\?\"?\s*:\s*(\d+)", self.body)
+        if m:
+            return max(1, min(300, int(m.group(1))))
+        return 30
 
 
 def _request(url: str, *, method="GET", body: bytes | None = None,
@@ -207,6 +227,23 @@ DISPLAY_NAMES = {
 def display_name(upstream_key: str, raw: str) -> str:
     """把上游的 display_name 规范成统一风格。"""
     return DISPLAY_NAMES.get(upstream_key) or raw
+
+
+def queue_info(frame: str) -> int:
+    """从首帧判断是否在排队。是则返回建议等待秒数，否则 0。
+
+    上游排队时 HTTP 状态是 200，错误藏在第一个 SSE 帧里（code 10605）。
+    帧内是多重 JSON 转义，直接定位 retryAfterSeconds 后的第一组数字即可，
+    避免去数反斜杠层数。
+    """
+    if "10605" not in frame and "isQueued" not in frame:
+        return 0
+    i = frame.find("retryAfterSeconds")
+    if i >= 0:
+        m = re.match(r"retryAfterSeconds\D*(\d+)", frame[i:])
+        if m:
+            return max(1, min(300, int(m.group(1))))
+    return 30
 
 
 def resolve_model(name: str, catalog: dict) -> str | None:

@@ -266,10 +266,12 @@ class Store:
             )
 
     def set_account_cooldown(self, account_id: int, seconds: int, error: str = ""):
+        """seconds<=0 表示立即解除冷却。"""
+        until = time.time() + seconds if seconds > 0 else 0
         with self._conn() as c:
             c.execute(
                 "UPDATE accounts SET cooldown_until=?, last_error=? WHERE id=?",
-                (time.time() + seconds, error[:500], account_id),
+                (until, error[:500], account_id),
             )
 
     def set_account_enabled(self, account_id: int, enabled: bool):
