@@ -365,6 +365,10 @@ def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
     normalized = []
     for m in messages:
         role = m.get("role", "user")
+        # OpenAI 的 developer 角色等同于 system，但上游用 serde 枚举校验，
+        # 只认 system/assistant/user/tool，原样转发会整条请求被拒
+        if role == "developer":
+            role = "system"
         content = m.get("content", "")
         if isinstance(content, list):
             content = "".join(p.get("text", "") for p in content if isinstance(p, dict))

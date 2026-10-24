@@ -78,6 +78,23 @@ class TestChatBody(unittest.TestCase):
         )
         self.assertIsInstance(body, bytes)
 
+    def test_developer_role_mapped_to_system(self):
+        """上游用 serde 枚举校验角色，developer 会让整条请求 400。"""
+        plain = self._decode(qoder.build_chat_body(
+            [{"role": "developer", "content": "be brief"},
+             {"role": "user", "content": "hi"}],
+            "auto",
+        ))
+        self.assertEqual([m["role"] for m in plain["messages"]], ["system", "user"])
+
+    def test_system_role_kept(self):
+        plain = self._decode(qoder.build_chat_body(
+            [{"role": "system", "content": "be brief"},
+             {"role": "user", "content": "hi"}],
+            "auto",
+        ))
+        self.assertEqual([m["role"] for m in plain["messages"]], ["system", "user"])
+
     def test_is_reasoning_follows_catalog(self):
         """没有思考能力的模型不能被标成 is_reasoning；否则上游会按思考模型处理。"""
         plain = self._decode(qoder.build_chat_body(
