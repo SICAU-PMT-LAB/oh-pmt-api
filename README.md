@@ -31,7 +31,7 @@ sub2api 是通用 AI 网关，但不支持 Qoder 平台，它的平台常量里�
 ```bash
 git clone <本仓库>
 cd oh-pmt-api
-Q2A_ADMIN_TOKEN=$(openssl rand -hex 24) Q2A_PORT=8791 python3 src/server.py
+PMT_ADMIN_TOKEN=$(openssl rand -hex 24) PMT_PORT=8791 python3 src/server.py
 ```
 
 打开 `http://127.0.0.1:8791/` 进入管理界面。首次启动用 `./start.sh` 会自动生成并保存管理令牌。
@@ -42,13 +42,13 @@ Q2A_ADMIN_TOKEN=$(openssl rand -hex 24) Q2A_PORT=8791 python3 src/server.py
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `Q2A_HOST` | `127.0.0.1` | 监听地址 |
-| `Q2A_PORT` | `8791` | 监听端口 |
-| `Q2A_ADMIN_TOKEN` | 空 | 管理接口令牌。为空时只允许本机访问管理接口 |
-| `Q2A_DATA` | `./data` | 数据库目录 |
-| `Q2A_TRUST_FORWARDED` | `0` | 设为 `1` 时从 `X-Forwarded-For` 读取客户端 IP。**只有前面有可信反向代理时才打开**，否则 IP 白名单可被伪造绕过 |
-| `Q2A_COSY_VERSION` | `1.1.75` | 签名版本号，Qoder 客户端升级后可能需要调整 |
-| `Q2A_ACCESS_LOG` | `0` | 设为 `1` 打印访问日志 |
+| `PMT_HOST` / `Q2A_HOST` | `127.0.0.1` | 监听地址 |
+| `PMT_PORT` / `Q2A_PORT` | `8791` | 监听端口 |
+| `PMT_ADMIN_TOKEN` / `Q2A_ADMIN_TOKEN` | 空 | 管理接口令牌。为空时只允许本机访问管理接口 |
+| `PMT_DATA` / `Q2A_DATA` | `./data` | 数据库目录 |
+| `PMT_TRUST_FORWARDED` / `Q2A_TRUST_FORWARDED` | `0` | 设为 `1` 时从 `X-Forwarded-For` 读取客户端 IP。**只有前面有可信反向代理时才打开**，否则 IP 白名单可被伪造绕过 |
+| `PMT_COSY_VERSION` / `Q2A_COSY_VERSION` | `1.1.75` | 签名版本号，Qoder 客户端升级后可能需要调整 |
+| `PMT_ACCESS_LOG` / `Q2A_ACCESS_LOG` | `0` | 设为 `1` 打印访问日志 |
 
 ### 反向代理
 
@@ -81,7 +81,9 @@ server {
 }
 ```
 
-启用反代后记得设置 `Q2A_TRUST_FORWARDED=1`，否则所有请求的来源 IP 都会显示为 127.0.0.1，IP 白名单会失效。
+环境变量两套名字都认：`PMT_*` 优先，`Q2A_*` 作为老名字继续生效，线上已有的 systemd unit 和 env 文件不需要改就能升级。
+
+启用反代后记得设置 `PMT_TRUST_FORWARDED=1`（老名字 `Q2A_TRUST_FORWARDED` 同样有效），否则所有请求的来源 IP 都会显示为 127.0.0.1，IP 白名单会失效。
 
 ## 使用
 

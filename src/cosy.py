@@ -205,7 +205,7 @@ def rsa_encrypt(plaintext: bytes) -> bytes:
 # COSY 头构造
 # ---------------------------------------------------------------------------
 
-COSY_VERSION = os.environ.get("Q2A_COSY_VERSION", "1.1.75")
+COSY_VERSION = os.environ.get("PMT_COSY_VERSION") or os.environ.get("Q2A_COSY_VERSION") or "1.1.75"
 COSY_CLIENT_TYPE = "5"
 COSY_USER_AGENT = "undici"
 COSY_DATA_POLICY = "agree"

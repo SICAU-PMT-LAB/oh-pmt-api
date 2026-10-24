@@ -572,7 +572,8 @@ def fetch_quota(account: dict) -> dict:
 # 列表接口对请求头敏感：缺 UA / cosy-clienttype / cosy-version 时服务端不报错，
 # 只是返回 showCampaign=false 的空列表。所以这里用桌面端的头组合。
 DESKTOP_CLIENT_TYPE = "10"
-DESKTOP_VERSION = os.environ.get("Q2A_DESKTOP_VERSION", "0.4.8")
+DESKTOP_VERSION = (os.environ.get("PMT_DESKTOP_VERSION")
+                   or os.environ.get("Q2A_DESKTOP_VERSION") or "0.4.8")
 
 
 def _sash_headers(account: dict, *, json_body: bool = False) -> dict:

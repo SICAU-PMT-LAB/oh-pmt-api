@@ -20,16 +20,26 @@ import providers
 import qoder
 from store import DEFAULT_MODELS, Store, day_start
 
+
+def _env(name: str, default: str = "") -> str:
+    """配置读取：新名字 PMT_* 优先，老名字 Q2A_* 继续认。
+
+    仓库从 qoder2api 改名成 oh-pmt-api，但线上 systemd unit 和 env 文件里
+    写的是 Q2A_*，保留老名字可以让人不动服务器就能升级；两边都没写时用默认值。
+    """
+    return os.environ.get("PMT_" + name) or os.environ.get("Q2A_" + name) or default
+
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.environ.get("Q2A_DATA", os.path.join(BASE_DIR, "data"))
+DATA_DIR = _env("DATA", os.path.join(BASE_DIR, "data"))
 DB_PATH = os.path.join(DATA_DIR, "oh-pmt-api.db")
 
 STORE: Store | None = None
 APP_VERSION = "2.0"
-TRUST_FORWARDED = os.environ.get("Q2A_TRUST_FORWARDED", "0") == "1"
+TRUST_FORWARDED = _env("TRUST_FORWARDED", "0") == "1"
 SESSION_COOKIE = "q2a_session"
 # 会话签名密钥：优先用环境变量，否则用固定串（重启后会话仍有效）
-_SESSION_KEY = os.environ.get("Q2A_SESSION_KEY", "").encode() or b"oh-pmt-api-local-session-key"
+_SESSION_KEY = _env("SESSION_KEY").encode() or b"oh-pmt-api-local-session-key"
 
 
 def _mask(secret: str, keep: int = 6) -> str:
@@ -54,6 +64,7 @@ def _unsign(signed: str) -> str | None:
     if not secrets.compare_digest(sig, want):
         return None
     return value
+
 
 # 排队时网关自己等，不把 429 甩给客户端（客户端重试几次就放弃了）
 QUEUE_MAX_WAIT = 180      # 最多等这么多秒
@@ -241,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        if os.environ.get("Q2A_ACCESS_LOG") == "1":
+        if _env("ACCESS_LOG") == "1":
             super().log_message(fmt, *args)
 
     # ---------------- 基础工具 ----------------
@@ -1383,7 +1394,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _redirect(self, location: str, cookie: str | None = None) -> bool:
         self.send_response(302)
-        self.send_header("Location", os.environ.get("Q2A_BASE_PATH", "") + location)
+        self.send_header("Location", _env("BASE_PATH") + location)
         if cookie:
             secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             self.send_header(
@@ -1435,8 +1446,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    host = os.environ.get("Q2A_HOST", "127.0.0.1")
-    port = int(os.environ.get("Q2A_PORT", "8791"))
+    host = _env("HOST", "127.0.0.1")
+    port = int(_env("PORT", "8791"))
     get_store()
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
