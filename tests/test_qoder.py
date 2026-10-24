@@ -1,5 +1,6 @@
 """上游客户端的纯函数测试（不发起网络请求）。"""
 
+import json
 import os
 import sys
 import unittest
@@ -183,6 +184,32 @@ class TestThinkingEffort(unittest.TestCase):
         self.assertEqual(qoder.requested_effort({"thinking": {"level": "max"}}), "max")
         self.assertIsNone(qoder.requested_effort({"messages": []}))
         self.assertIsNone(qoder.requested_effort(None))
+
+
+class TestQuotaExhausted(unittest.TestCase):
+    """112 是账号级额度不足，要在首帧就认出来好换账号。"""
+
+    def _envelope(self, body, status=403):
+        outer = {"headers": {}, "body": json.dumps(body), "statusCodeValue": status}
+        return "data:" + json.dumps(outer)
+
+    def test_detects_112(self):
+        frame = self._envelope({"code": "112",
+                                "message": json.dumps({"pricingUrl": "https://qoder.com/pricing"})})
+        self.assertTrue(qoder.quota_exhausted(frame))
+
+    def test_normal_chunk_is_not_quota(self):
+        frame = self._envelope({"choices": [{"delta": {"content": "hi"}}]}, status=200)
+        self.assertFalse(qoder.quota_exhausted(frame))
+
+    def test_queue_frame_is_not_quota(self):
+        frame = self._envelope({"code": "10605",
+                                "message": json.dumps({"isQueued": True, "retryAfterSeconds": 30})})
+        self.assertFalse(qoder.quota_exhausted(frame))
+        self.assertEqual(qoder.queue_info(frame), 30)
+
+    def test_empty_frame(self):
+        self.assertFalse(qoder.quota_exhausted(""))
 
 
 if __name__ == "__main__":

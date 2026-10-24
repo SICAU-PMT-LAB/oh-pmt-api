@@ -233,6 +233,20 @@ def display_name(upstream_key: str, raw: str) -> str:
     return DISPLAY_NAMES.get(upstream_key) or raw
 
 
+def quota_exhausted(frame: str) -> bool:
+    """首帧是否是该账号的额度不足（code 112）。
+
+    112 是账号级的：这个账号买不起这个模型的套餐，额度页在 pricingUrl 里。
+    同一个密钥下的其他账号可能完全正常，所以遇到它要换账号，而不是让
+    整个请求 502。与 10605 一样藏在首帧的信封里，只有 statusCodeValue
+    非 200 时才会被 convert.iter_chunks 当作错误抛出来。
+
+    帧内是多重 JSON 转义，不同序列化方式的空白也不一样，所以用正则跳过
+    反斜杠和空格，不去数层数。
+    """
+    return re.search(r"code\\*[\"']?\s*:?\s*\\*[\"']?112\\*[\"']?", frame) is not None
+
+
 def queue_info(frame: str) -> int:
     """从首帧判断是否在排队。是则返回建议等待秒数，否则 0。
 

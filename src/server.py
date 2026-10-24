@@ -654,17 +654,21 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 lines = qoder.chat_stream(account, payload, model)
                 first = next(iter(lines), None)
-                wait = qoder.queue_info(first or "")
+                frame = first or ""
+                wait = qoder.queue_info(frame)
+                # 排队和额度不足都是账号级的：上游对这个账号限流，或者这个账号
+                # 买不起这个模型的套餐。同一个密钥下的其他账号往往立刻能用，
+                # 先把同区域还没试过的账号试一遍。与排队一样在首帧就发现，
+                # 那时流还没开始写，换账号对客户端是透明的。
+                if wait or qoder.quota_exhausted(frame):
+                    spare = store.pick_account(region, exclude=tried)
+                    if spare is not None:
+                        tried.add(spare["id"])
+                        account = ensure_fresh_token(spare)
+                        ctx["account_id"] = account["id"]
+                        continue
                 if not wait:
                     break
-                # 排队是账号级的（上游对该账号限流），换一个账号往往立刻就能用。
-                # 先把同区域的其他账号试一遍，都不行再回到当前账号干等。
-                spare = store.pick_account(region, exclude=tried)
-                if spare is not None:
-                    tried.add(spare["id"])
-                    account = ensure_fresh_token(spare)
-                    ctx["account_id"] = account["id"]
-                    continue
                 round_no += 1
                 left = deadline - time.time()
                 if left <= 0 or round_no > QUEUE_MAX_ROUNDS:
