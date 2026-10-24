@@ -1199,9 +1199,15 @@ class Handler(BaseHTTPRequestHandler):
             mid = row["member_id"]
             n = int(row["n"] or 0)
             ok = int(row["ok"] or 0)
+            if mid is None:
+                name = "未关联成员"
+            elif mid in members:
+                name = members[mid]
+            else:
+                name = f"已删除成员 #{mid}"
             per_member.append({
                 "id": mid,
-                "name": members.get(mid, "未关联"),
+                "name": name,
                 "requests": n,
                 "errors": int(row["err"] or 0),
                 "success_rate": round(ok * 100.0 / n, 2) if n else None,

@@ -115,6 +115,7 @@ function render() {
   const pct = a.credits_total > 0
     ? Math.max(0, Math.min(1, a.credits_remaining / a.credits_total)) : 0;
   const usedPct = a.credits_total > 0 ? a.credits_used / a.credits_total : 0;
+  // 段内深色表示已用部分，浅色表示剩余；整条按各段占总额的比例铺满
   // 每一段画的是「这一块占全部额度的比例」，段内用深浅表示还剩多少
   const baseShare = a.credits_total > 0 ? a.credits_base_total / a.credits_total : 0;
   const addonShare = a.credits_total > 0 ? a.credits_addon_total / a.credits_total : 0;
@@ -202,6 +203,9 @@ function render() {
             background:var(--ok)"></div>` : ''}
           <div style="flex:1;background:var(--rule-strong)"></div>
         </div>
+        ${a.credits_base_total + a.credits_addon_total + a.credits_shared_total > 0 ? '' : `
+          <div class="hint" style="margin-top:12px">
+            上游还没返回额度构成，点右上角「同步额度」拉一次快照。</div>`}
         <div class="legend-dots">
           ${a.credits_base_total > 0 ? `<span><i class="d" style="background:var(--gold)"></i>
             套餐剩 ${fmtCompact(a.credits_base_remaining)} / ${fmtCompact(a.credits_base_total)}</span>` : ''}
@@ -210,11 +214,12 @@ function render() {
           ${a.credits_shared_total > 0 ? `<span><i class="d" style="background:var(--ok)"></i>
             共享 ${fmtCompact(a.credits_shared_remaining)} / ${fmtCompact(a.credits_shared_total)}</span>` : ''}
         </div>
-        <div class="progress thick" style="margin-top:16px">
-          <div data-w="${(usedPct * 100).toFixed(1)}"></div>
-        </div>
-        <div class="hint">已用 ${(usedPct * 100).toFixed(1)}% ·
-          ${a.synced_ago == null ? '未同步过' : a.synced_ago + ' 秒前同步'}</div>
+        <div class="hint" style="margin-top:12px">已用
+          ${(usedPct * 100).toFixed(1)}% ·
+          ${a.synced_ago == null ? '未同步过'
+            : a.synced_ago < 90 ? a.synced_ago + ' 秒前同步'
+            : a.synced_ago < 5400 ? Math.round(a.synced_ago / 60) + ' 分钟前同步'
+            : Math.round(a.synced_ago / 3600) + ' 小时前同步'}</div>
 
         <h3 class="section" style="margin-top:20px">凭证</h3>
         <div class="kv"><span class="k">掩码</span>
@@ -260,6 +265,7 @@ function render() {
             <th class="num">Token</th><th>结果</th></tr></thead>
           <tbody id="det-recent"></tbody>
         </table>
+        <div id="recent-more"></div>
       </div>
     </div>
   `;
@@ -306,7 +312,9 @@ function render() {
       `<td class="${c.cls || ''}">${c.fmt(r)}</td>`).join('')}</tr>`).join('')}</tbody>`;
 
   const body = document.getElementById('det-recent');
-  body.innerHTML = a.recent.length ? a.recent.map(r => `<tr>
+  // 摘要页只放最近 12 条，其余点开再看，避免页面拉成几千像素长
+  const shown = a.recent.slice(0, 12);
+  const rowHtml = r => `<tr>
     <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
       { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
     <td>${esc(modelName(r.model))}</td>
@@ -314,7 +322,18 @@ function render() {
     <td class="num">${fmtInt(r.total_tokens)}</td>
     <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
       : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
-  </tr>`).join('') : '<tr><td colspan="5" class="empty">还没有调用记录</td></tr>';
+  </tr>`;
+  body.innerHTML = shown.length ? shown.map(rowHtml).join('')
+    : '<tr><td colspan="5" class="empty">还没有调用记录</td></tr>';
+  const more = document.getElementById('recent-more');
+  more.innerHTML = a.recent.length > shown.length
+    ? `<button class="small ghost" id="btn-more" style="margin-top:12px">
+        展开其余 ${a.recent.length - shown.length} 条</button>` : '';
+  const btnMore = document.getElementById('btn-more');
+  if (btnMore) btnMore.addEventListener('click', () => {
+    body.insertAdjacentHTML('beforeend', a.recent.slice(shown.length).map(rowHtml).join(''));
+    more.innerHTML = '';
+  });
 
   const ck = document.getElementById('btn-checkin');
   if (ck) ck.addEventListener('click', async () => {
