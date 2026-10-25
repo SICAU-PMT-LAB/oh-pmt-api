@@ -139,6 +139,12 @@ AES key 只有 64 bit 熵且 key == IV，RSA 公钥实测 1024 位。`qoder_sign
   时刻，并发请求各拿各的账号；时间戳必须在 `BEGIN IMMEDIATE` 之后取，
   否则并发写入的时间几乎相同，排序退化成按 id
 - 故障冷却换号、token 自动刷新
+- SSE 流一旦开写就不能再补发完整 HTTP 响应（`_error` 会检查
+  `_stream_started`，改发一条 SSE 错误帧）；否则 `[DONE]` 后面会粘上
+  `HTTP/1.1 500 ...` 报文，客户端把它当数据解析
+- 上游 chunk 的 `finish_reason` 空字符串要归一成 `null`：OpenAI 语义是
+  中间帧为 null、末帧才有值，按 finish_reason 判断流结束的客户端
+  （DeepSeek Harness）遇到 `""` 会判定流未结束并重试整轮
 - 冷却只针对账号自身的问题（凭证失效、限流、额度耗尽）；请求内容被上游
   拒绝（如 11128 渠道校验）不冷却账号，也不重试换号——换账号重发一样被拒
 - 生成 API Key 分发给多人

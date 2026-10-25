@@ -138,6 +138,31 @@ curl -X POST https://api.example.com/api/accounts/import \
 
 签到只有国内版有（每日 100 积分，`/v2/billing/meter/daily-checkin`），国际版返回「签到活动未开放」。
 
+### 客户端接入注意
+
+思考档位要客户端自己声明才发得出去。以 DeepSeek Harness 为例，`models` 里
+必须写 `reasoningEfforts`，否则选择器上不会出现档位，请求里也不会带参数：
+
+```yaml
+providers:
+  oh-pmt:
+    apiKeyEnv: OH_PMT_API_KEY
+    api: openai-completions
+    baseURL: https://your.host/v1
+    compat:
+      supportsReasoningEffort: true
+      thinkingFormat: openai      # 发 reasoning_effort 字段
+    models:
+      - id: DeepSeek-V4.1-Flash
+        contextWindow: 262144
+        maxTokens: 32768
+        reasoningEfforts:          # 不写这段就没有档位可选
+          off:
+          low: low
+          medium: medium
+          high: high
+```
+
 ### 思考强度
 
 客户端怎么写都行，网关统一收口成上游认的 `reasoning_effort`：

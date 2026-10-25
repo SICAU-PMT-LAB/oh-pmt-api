@@ -620,3 +620,24 @@ class ChunkNormalizeTest(unittest.TestCase):
         # choices 是字符串时不能抛 string indices must be integers
         agg = convert.aggregate(iter(['data: {"choices":"oops"}']), "m", {})
         self.assertEqual(agg["choices"][0]["message"]["content"], None)
+
+
+class ChatHandlerRegressionTest(unittest.TestCase):
+    """回归：这两处曾让 dsh 的每一轮都失败。"""
+
+    def test_effort_object_loop_does_not_clobber_api_key(self):
+        """思考档位循环变量曾叫 key，覆盖了 API key 记录，
+        导致流发完之后 finally 里 key["id"] 抛 string indices。"""
+        import inspect
+        import server
+        src = inspect.getsource(server.Handler._chat_completions)
+        self.assertNotIn('for key in ("reasoning", "thinking")', src)
+        self.assertIn('for field in ("reasoning", "thinking")', src)
+
+    def test_error_after_stream_started_writes_sse_not_http(self):
+        """流开始后不能再补发完整 HTTP 响应，否则 [DONE] 后面会粘一段 500 报文。"""
+        import inspect
+        import server
+        src = inspect.getsource(server.Handler._error)
+        self.assertIn("_stream_started", src)
+        self.assertIn("convert.DONE", src)

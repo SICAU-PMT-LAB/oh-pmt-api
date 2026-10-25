@@ -8,6 +8,8 @@ import json
 import os
 import secrets
 import threading
+import sys
+import traceback
 import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -520,6 +522,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_html("login.html")
             return self._error(404, "not_found", "接口不存在")
         except Exception as e:  # noqa: BLE001
+            # 留一份堆栈在日志里：流式响应开写之后这里只会变成一条 SSE
+            # 错误帧，客户端看到的只是 "internal_error"，查不出原因
+            traceback.print_exc(file=sys.stderr)
             return self._error(500, "internal_error", str(e))
 
     def do_POST(self):
@@ -568,6 +573,9 @@ class Handler(BaseHTTPRequestHandler):
         except providers.Unsupported as e:
             return self._error(400, "provider_unsupported", str(e))
         except Exception as e:  # noqa: BLE001
+            # 留一份堆栈在日志里：流式响应开写之后这里只会变成一条 SSE
+            # 错误帧，客户端看到的只是 "internal_error"，查不出原因
+            traceback.print_exc(file=sys.stderr)
             return self._error(500, "internal_error", str(e))
 
     def do_PATCH(self):
@@ -763,9 +771,12 @@ class Handler(BaseHTTPRequestHandler):
             # thinking / reasoning 这两个对象原样带上，只传 effort 会丢掉
             # {"type": "enabled"} 这类「开思考但不指定档位」的写法。
             if provider.wants_effort_objects:
-                for key in ("reasoning", "thinking"):
-                    if isinstance(body.get(key), dict):
-                        parameters[key] = body[key]
+                # 循环变量不能叫 key：外层 key 是 API key 记录，
+                # 被覆盖后 finally 里的 key["id"] 会抛 string indices 错误，
+                # 而那时流已经发完，客户端会收到一串污染数据的错误帧
+                for field in ("reasoning", "thinking"):
+                    if isinstance(body.get(field), dict):
+                        parameters[field] = body[field]
             effort = provider.normalize_effort(qoder.requested_effort(body), meta)
             if effort:
                 parameters["reasoning_effort"] = effort
