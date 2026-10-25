@@ -103,6 +103,15 @@ class UpstreamError(qoder.UpstreamError):
         return self.status == 429 or "11134" in self.body
 
     @property
+    def is_request_rejected(self) -> bool:
+        """请求内容被上游的渠道校验拦下（11128），账号本身没问题。
+
+        这条必须和凭证失效区分开：换一个账号重发同样的内容还是会被拦，
+        给账号加冷却只会让唯一的账号在一分钟内整体不可用。
+        """
+        return "11128" in self.body
+
+    @property
     def is_busy(self) -> bool:
         """模型侧资源紧张，换账号或稍后重试即可，不是凭证问题。"""
         return "11134" in self.body or "11133" in self.body

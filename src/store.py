@@ -369,10 +369,18 @@ class Store:
         """选账号：优先指定的那个，不可用时回退到同厂商同区域最久未用的。
 
         exclude 里的账号会被跳过，用于一个账号排队时换到别的账号重试。
+
+        选中即占用：这里会在同一个事务里把 last_used_at 推到当前时刻，
+        所以并发请求不会同时拿到同一个「最久未用」的账号。选完不占用的
+        话，两个请求会读到同一个 id，等于没有轮询。
         """
-        now = time.time()
         skip = tuple(exclude or ())
         with self._conn() as c:
+            # BEGIN IMMEDIATE 拿写锁，读和写必须在同一个事务里。
+            # 时间戳也要在拿到锁之后再取：提前取的话并发线程会写出几乎
+            # 相同的时间戳，排序退化成按 id，轮询就变成总压同一个账号。
+            c.execute("BEGIN IMMEDIATE")
+            now = time.time()
             if prefer_id and prefer_id not in skip:
                 r = c.execute(
                     """SELECT * FROM accounts WHERE id=? AND provider=? AND region=?
@@ -380,7 +388,11 @@ class Store:
                     (prefer_id, provider, region, now),
                 ).fetchone()
                 if r:
-                    return dict(r)
+                    c.execute("UPDATE accounts SET last_used_at=? WHERE id=?",
+                              (now, r["id"]))
+                    picked = dict(r)
+                    picked["last_used_at"] = now
+                    return picked
             sql = ("SELECT * FROM accounts WHERE provider=? AND region=? "
                    "AND enabled=1 AND cooldown_until < ?")
             args = [provider, region, now]
@@ -389,7 +401,12 @@ class Store:
                 args.extend(skip)
             sql += " ORDER BY last_used_at ASC, id ASC LIMIT 1"
             r = c.execute(sql, args).fetchone()
-            return dict(r) if r else None
+            if not r:
+                return None
+            c.execute("UPDATE accounts SET last_used_at=? WHERE id=?", (now, r["id"]))
+            picked = dict(r)
+            picked["last_used_at"] = now
+            return picked
 
     def touch_account(self, account_id: int):
         with self._conn() as c:

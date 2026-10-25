@@ -66,6 +66,15 @@ class UpstreamError(Exception):
     def is_rate_limited(self) -> bool:
         return self.status == 429 or self.is_queued
 
+    @property
+    def is_request_rejected(self) -> bool:
+        """请求内容本身被拒，换账号重发也没用。
+
+        子类用它标记「这条请求不该重试、也不该给账号加冷却」的错误，
+        例如上游对客户端模板的渠道校验。默认没有这类错误。
+        """
+        return False
+
     def retry_after(self) -> int:
         """上游要求等待的秒数，拿不到就给 30。"""
         import re

@@ -737,8 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
         if account is None:
             return fail(503, "no_account",
-                        f"{provider.label} 的 {provider.region_label(want)} 区域"
-                        f"没有可用账号")
+                        self._no_account_reason(provider, want))
         ctx["account_id"] = account["id"]
 
         try:
@@ -830,6 +829,10 @@ class Handler(BaseHTTPRequestHandler):
                 code, msg, wait = "upstream_busy", "上游模型繁忙，请稍后重试", e.retry_after()
             elif e.is_rate_limited:
                 code, msg, wait = "upstream_rate_limited", "上游限流，请稍后重试", e.retry_after()
+            elif e.is_request_rejected:
+                # 请求内容被上游拦下：账号是好的，换账号重发也一样被拦，
+                # 所以不加冷却也不重试，把原因直接告诉客户端
+                code, msg, wait = "upstream_rejected", str(e), 0
             else:
                 store.set_account_cooldown(account["id"], 60, str(e))
                 code, msg, wait = "upstream_error", str(e), 0
@@ -1191,6 +1194,26 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json(200, {"ok": True, "id": key_id, "key": raw})
 
     # ---------------- 视图 ----------------
+
+    @staticmethod
+    def _no_account_reason(provider, region: str) -> str:
+        """没有可用账号时，说清到底是没配、全停了、还是都在冷却。"""
+        label = f"{provider.label} 的 {provider.region_label(region)} 区域"
+        rows = [a for a in STORE.list_accounts(region, provider=provider.slug)] \
+            if STORE else []
+        if not rows:
+            return f"{label}没有账号，请先在账号页接入"
+        now = time.time()
+        enabled = [a for a in rows if a.get("enabled")]
+        if not enabled:
+            return f"{label}的 {len(rows)} 个账号都已停用"
+        cooling = [a for a in enabled if (a.get("cooldown_until") or 0) > now]
+        if len(cooling) == len(enabled):
+            left = int(min(a["cooldown_until"] for a in cooling) - now) + 1
+            reason = (cooling[0].get("last_error") or "").strip()
+            tail = f"：{reason[:120]}" if reason else ""
+            return f"{label}的账号都在冷却中，{left} 秒后恢复{tail}"
+        return f"{label}没有可用账号"
 
     def _accounts_view(self) -> list[dict]:
         store = get_store()

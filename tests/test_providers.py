@@ -501,3 +501,97 @@ class WorkbuddyBrandAnchorTest(unittest.TestCase):
             "\nYou are an AI agent powered by DeepSeek Harness.\nrest")
         self.assertNotIn("DeepSeek Harness", out)
         self.assertIn("rest", out)
+
+
+class WorkbuddyRejectionTest(unittest.TestCase):
+    """11128 是请求内容问题，不能当成账号故障去冷却。"""
+
+    def test_channel_rejection_is_not_auth_dead(self):
+        import workbuddy
+        err = workbuddy.UpstreamError(
+            400, '{"code":11128,"msg":"Illegal API invocation from an unapproved channel"}')
+        self.assertTrue(err.is_request_rejected)
+        self.assertFalse(err.is_auth_dead)
+        self.assertFalse(err.is_rate_limited)
+        self.assertFalse(err.is_queued)
+
+    def test_busy_and_auth_errors_are_unaffected(self):
+        import workbuddy
+        self.assertTrue(workbuddy.UpstreamError(400, '{"code":11134}').is_rate_limited)
+        self.assertTrue(workbuddy.UpstreamError(401, "{}").is_auth_dead)
+        self.assertFalse(workbuddy.UpstreamError(401, "{}").is_request_rejected)
+
+
+class NoAccountReasonTest(unittest.TestCase):
+    """503 的措辞要能区分「没配」「停用」「冷却中」。"""
+
+    def _reason(self, rows, region="cn"):
+        import providers
+        import server
+        from unittest import mock
+        fake = mock.Mock()
+        fake.list_accounts.return_value = rows
+        with mock.patch.object(server, "STORE", fake):
+            return server.Handler._no_account_reason(providers.get("workbuddy"), region)
+
+    def test_no_accounts_at_all(self):
+        self.assertIn("没有账号", self._reason([]))
+
+    def test_all_disabled(self):
+        self.assertIn("停用", self._reason(
+            [{"id": 1, "enabled": 0, "cooldown_until": 0, "last_error": ""}]))
+
+    def test_all_cooling_down_reports_remaining_time(self):
+        import time
+        text = self._reason([{"id": 1, "enabled": 1,
+                              "cooldown_until": time.time() + 40,
+                              "last_error": "upstream 400: 11128"}])
+        self.assertIn("冷却", text)
+        self.assertIn("秒后恢复", text)
+        self.assertIn("11128", text)
+
+
+class PickAccountConcurrencyTest(unittest.TestCase):
+    """选中即占用：并发请求不能同时拿到同一个「最久未用」的账号。"""
+
+    def test_parallel_picks_spread_across_accounts(self):
+        import collections
+        import os
+        import tempfile
+        import threading
+        import store as st
+
+        d = tempfile.mkdtemp()
+        s = st.Store(os.path.join(d, "t.db"))
+        for i in range(3):
+            s.add_account(uid=f"u{i}", region="global", credential=f"pt-{i}")
+
+        got = collections.Counter()
+        lock = threading.Lock()
+
+        def worker():
+            a = s.pick_account("global")
+            with lock:
+                got[a["id"] if a else None] += 1
+
+        threads = [threading.Thread(target=worker) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # 三个账号各被选中 4 次：时间戳必须在锁内取，否则并发写入的时间
+        # 几乎相同，排序退化成按 id，轮询就变成全压一个账号
+        self.assertEqual(dict(got), {1: 4, 2: 4, 3: 4})
+
+    def test_pick_marks_account_used_immediately(self):
+        import os
+        import tempfile
+        import store as st
+
+        d = tempfile.mkdtemp()
+        s = st.Store(os.path.join(d, "t.db"))
+        s.add_account(uid="a", region="global", credential="pt-a")
+        s.add_account(uid="b", region="global", credential="pt-b")
+        first = s.pick_account("global")
+        second = s.pick_account("global")
+        self.assertNotEqual(first["id"], second["id"])
