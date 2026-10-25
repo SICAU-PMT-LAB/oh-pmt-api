@@ -45,12 +45,30 @@ _LEGACY_SESSION_KEYS = [b"qoder2api-local-session-key"]
 
 
 def _mask(secret: str, keep: int = 6) -> str:
-    """凭证展示用的掩码：只留头尾，中间固定长度，不泄露真实长度差。"""
+    """凭证展示用的掩码：只留头尾，中间固定长度，不泄露真实长度差。
+
+    WorkBuddy 这类凭证是整份 JSON 文件，逐个字符截断既看不出是什么、又会把
+    文件里的 token 漏出来一小截，所以整个换成一句描述。
+    """
     if not secret:
         return ""
-    if len(secret) <= keep * 2:
-        return secret[:2] + "…"
-    return f"{secret[:keep]}…{secret[-4:]}"
+    text = secret.strip()
+    if text.startswith("{") or text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return "账号文件"
+        auth = parsed
+        if isinstance(parsed, list):
+            auth = parsed[0] if parsed else {}
+        if isinstance(auth, dict) and isinstance(auth.get("auth"), dict):
+            auth = auth["auth"]
+        token = str(auth.get("token") or auth.get("accessToken") or "") if isinstance(auth, dict) else ""
+        tail = f"，token 尾号 {token[-4:]}" if token else ""
+        return f"账号文件（已保存{tail}）"
+    if len(text) <= keep * 2:
+        return text[:2] + "…"
+    return f"{text[:keep]}…{text[-4:]}"
 
 
 def _sign(value: str) -> str:

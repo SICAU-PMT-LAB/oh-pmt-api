@@ -105,6 +105,14 @@ async function load() {
 
 const modelName = id => (MODELS.find(m => m.id === id) || {}).name || id || '未知';
 
+// 凭据有效期从十几分钟到一个月都有，统一按量级换单位
+function expiresLabel(seconds) {
+  if (!(seconds > 0)) return '已过期，下次调用时续期';
+  if (seconds >= 172800) return Math.round(seconds / 86400) + ' 天';
+  if (seconds >= 7200) return Math.round(seconds / 3600) + ' 小时';
+  return Math.round(seconds / 60) + ' 分钟';
+}
+
 function render() {
   const a = DATA;
   const t = a.totals || {};
@@ -215,7 +223,7 @@ function render() {
             共享 ${fmtCompact(a.credits_shared_remaining)} / ${fmtCompact(a.credits_shared_total)}</span>` : ''}
         </div>
         <div class="hint" style="margin-top:12px">已用
-          ${(usedPct * 100).toFixed(1)}% ·
+          ${a.credits_total > 0 ? (usedPct * 100).toFixed(1) + '%' : '—'} ·
           ${a.synced_ago == null ? '未同步过'
             : a.synced_ago < 90 ? a.synced_ago + ' 秒前同步'
             : a.synced_ago < 5400 ? Math.round(a.synced_ago / 60) + ' 分钟前同步'
@@ -225,7 +233,7 @@ function render() {
         <div class="kv"><span class="k">掩码</span>
           <span class="v mono">${esc(a.credential_masked || '—')}</span></div>
         <div class="kv"><span class="k">续期剩余</span>
-          <span class="v mono">${a.expires_in > 0 ? Math.round(a.expires_in / 60) + ' 分钟' : '已过期，下次调用时续期'}</span></div>
+          <span class="v mono">${expiresLabel(a.expires_in)}</span></div>
         ${a.credential_url ? `<div class="hint">凭证在
           <a href="${esc(a.credential_url)}" target="_blank" rel="noopener"
              style="color:var(--gold)">${esc(a.credential_url)}</a> 管理</div>` : ''}
