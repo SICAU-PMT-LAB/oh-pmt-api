@@ -2,18 +2,21 @@
 
 把订阅制 AI 账号的额度封装成 OpenAI 兼容 API，通过 API Key 分发给多人使用。每个密钥可以独立限制积分用量、来源 IP 和可用模型。
 
-目前真实可用的接入来源是 **Qoder**；**WorkBuddy / Cline / CommandCode** 的账号模型、接口和界面已经按厂商分开，补上各自的适配器即可启用。
+目前真实可用的接入来源是 **Qoder** 和 **WorkBuddy**；**Cline / CommandCode** 的账号模型、接口和界面已经按厂商分开，补上各自的适配器即可启用。
 
 ## 为什么不用现成的
 
 sub2api 是通用 AI 网关，但不支持 Qoder 平台，它的平台常量里只有 Anthropic、OpenAI、Gemini、Antigravity、Grok、Kimi、智谱、DeepSeek、MiniMax 等。Qoder 的接入协议是私有的，无法当作普通 OpenAI 兼容上游接进去。
+
+WorkBuddy 那一侧有人做过单账号反代（`workbuddy2api`，一个本地 FastAPI 进程）。本项目不依赖它：协议直接实现在 `src/workbuddy.py` 里，账号进的是同一个池子，能被同一套密钥、限额、IP 白名单和统计口径管住。
 
 `shuishuipingan/qoder2api-hub` 实现了完整协议，但它没有 IP 白名单（全仓搜索 `ip_whitelist` 零命中），限额也是账号级的而不是 Key 级的（5 个护栏键都挂在 `Account` 对象上，`key_id` 只用于用量归属）。这两个缺口正好是本项目的核心需求，加上它有 31.7k 行代码包含大量不需要的功能，所以本项目是精简重写。
 
 ## 功能
 
 - 多厂商账号池：同一个池里按厂商与区域分开管理，账号表带 `provider` 列
-- 用 PAT 导入多个 Qoder 账号，国际版与国内版分别调度
+- 已实现两家的完整协议：Qoder（PAT）与 WorkBuddy（官方导出的账号文件），两家的国际版与国内版各自调度
+- 批量导入：一次选中多个导出的账号文件，逐条回报成功与失败原因
 - 账号池轮询，故障账号自动冷却，job token 到期自动续期
 - 成员体系：为每人设定每日与每周积分上限、优先使用的账号、可用模型
 - **按上游真实积分计费**：直接读 `usage.credits`，不是按 token 估算
@@ -113,11 +116,33 @@ curl https://api.example.com/v1/chat/completions \
 
 在 pi、OpenAI SDK、各类客户端里填写同一个 base URL 和密钥即可。
 
+### 接入 WorkBuddy
+
+WorkBuddy（腾讯 CodeBuddy）的凭证不是一个 token，而是官方客户端导出的账号文件。在账号页点「导入文件」，选厂商 WorkBuddy，然后选中文件（可多选）：
+
+- `workbuddy-<uid>.json` —— 单账号对象
+- `cockpit-<uid>.json` —— 数组，一个文件里可以有多条
+
+文件原样提交即可，不用改名、不用合并。面板会逐条回报结果：哪条进来了、剩余多少积分，哪条失败了以及原因。同一个账号重复导入是覆盖，不会出现两条。
+
+也可以把文件内容整个粘进「接入账号」的文本框，或直接调接口：
+
+```bash
+curl -X POST https://api.example.com/api/accounts/import \
+  -H "Content-Type: application/json" \
+  -b "q2a_session=<管理员会话>" \
+  -d '{"provider":"workbuddy","files":[{"name":"cockpit-x.json","content":"<文件原文>"}]}'
+```
+
+区域由文件里的 `domain` 决定，不看界面上选的：`codebuddy.cn` 是国内版，其余是国际版。两套凭证互不通用。
+
+签到只有国内版有（每日 100 积分，`/v2/billing/meter/daily-checkin`），国际版返回「签到活动未开放」。
+
 ### 加一家新厂商
 
 `src/providers.py` 里每个厂商是一个适配器，需要实现：换凭据（`connect`）、续期（`refresh`）、列模型（`list_models`）、发请求（`build_chat_body` + `chat_stream`）、读额度（`fetch_quota`）。把 `available` 改成 `True` 并填上区域，界面上的「待接入」卡片就会变成可用的账号入口。
 
-Qoder 之外的三家目前是 `PendingProvider`，调用 `connect` 会明确抛 `Unsupported`。
+Qoder（`src/qoder.py`）与 WorkBuddy（`src/workbuddy.py`）已经实现完整协议；Cline 和 CommandCode 仍是 `PendingProvider`，调用 `connect` 会明确抛 `Unsupported`，界面上标「待接入」。
 
 ## 风险说明
 
@@ -161,10 +186,11 @@ python3 -m unittest discover -s tests -v
 ```
 src/providers.py  厂商注册表与适配器（新增厂商只需加一个类）
 src/cosy.py       COSY 签名、AES/RSA、自定义 Base64、设备指纹派生
-src/qoder.py      与上游通信：PAT 交换、令牌刷新、模型列表、对话、签到
+src/qoder.py      与 Qoder 上游通信：PAT 交换、令牌刷新、模型列表、对话、签到
+src/workbuddy.py  与 WorkBuddy 上游通信：账号文件解析、令牌刷新、对话、额度、签到
 src/store.py      SQLite：账号、Key、用量、设置、各种统计口径
 src/guard.py      访问控制：IP 白名单、模型白名单、配额
-src/convert.py    SSE 信封拆包，转 OpenAI 格式
+src/convert.py    SSE 归一：拆 Qoder 的信封，直通 WorkBuddy 的原生 chunk
 src/server.py     HTTP 服务与路由
 web/assets/ui.css    设计系统：白金配色、明暗主题、动效
 web/assets/charts.js 手写 SVG 图表（折线/柱状/环形/堆叠面积/直方图/热力图）

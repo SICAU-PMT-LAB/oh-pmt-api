@@ -22,9 +22,11 @@ class ProviderRegistryTest(unittest.TestCase):
         slugs = {p.slug for p in providers.PROVIDERS.values()}
         self.assertEqual(slugs, {"qoder", "workbuddy", "cline", "commandcode"})
 
-    def test_only_qoder_available(self):
+    def test_only_implemented_vendors_available(self):
+        # qoder 与 workbuddy 有真实协议；cline / commandcode 仍是占位
         self.assertTrue(providers.get("qoder").available)
-        for slug in ("workbuddy", "cline", "commandcode"):
+        self.assertTrue(providers.get("workbuddy").available)
+        for slug in ("cline", "commandcode"):
             self.assertFalse(providers.get(slug).available, slug)
 
     def test_unknown_falls_back_to_default(self):
@@ -34,6 +36,18 @@ class ProviderRegistryTest(unittest.TestCase):
     def test_pending_provider_refuses_connect(self):
         with self.assertRaises(providers.Unsupported):
             providers.get("cline").connect("key", "default")
+
+    def test_workbuddy_exposes_both_regions(self):
+        wb = providers.get("workbuddy")
+        self.assertIn("cn", wb.regions)
+        self.assertIn("global", wb.regions)
+        # 两个区域的凭证互不通用，签到只有国内版有
+        self.assertTrue(wb.supports_checkin)
+        row = wb.describe()
+        self.assertEqual([r["id"] for r in row["regions"]], ["cn", "global"])
+        # 凭证是导出的 JSON 文件，没有统一前缀，也没有「去这里申请」的地址
+        self.assertEqual(row["credential_prefix"], "")
+        self.assertEqual(row["credential_url"], "")
 
     def test_qoder_exposes_both_regions(self):
         q = providers.get("qoder")
@@ -260,3 +274,157 @@ class UpsertKeyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkbuddyAdapterTest(unittest.TestCase):
+    """WorkBuddy 的凭证是导出的文件，两种格式都要认，区域以文件里的 domain 为准。"""
+
+    WORKBUDDY_FILE = (
+        '{"account": {"uid": "u-1", "nickname": "159****8770"},'
+        ' "auth": {"accessToken": "at", "refreshToken": "rt",'
+        ' "expiresAt": 1795486350000, "domain": "www.codebuddy.cn"}}'
+    )
+    COCKPIT_FILE = '[' + WORKBUDDY_FILE + ']'
+
+    def test_parse_single_file(self):
+        import workbuddy
+        info = workbuddy.parse_credential(self.WORKBUDDY_FILE)
+        self.assertEqual(info["uid"], "u-1")
+        self.assertEqual(info["access_token"], "at")
+        self.assertEqual(info["refresh_token"], "rt")
+        self.assertEqual(info["region"], "cn")
+        # 毫秒时间戳要归一成秒
+        self.assertEqual(int(info["expires_at"]), 1795486350)
+
+    def test_parse_cockpit_array(self):
+        import workbuddy
+        info = workbuddy.parse_credential(self.COCKPIT_FILE)
+        self.assertEqual(info["uid"], "u-1")
+
+    def test_global_domain_maps_to_global_region(self):
+        import workbuddy
+        text = self.WORKBUDDY_FILE.replace("www.codebuddy.cn", "www.workbuddy.ai")
+        self.assertEqual(workbuddy.parse_credential(text)["region"], "global")
+
+    def test_empty_or_broken_file_is_rejected(self):
+        import workbuddy
+        with self.assertRaises(workbuddy.UpstreamError):
+            workbuddy.parse_credential("")
+        with self.assertRaises(workbuddy.UpstreamError):
+            workbuddy.parse_credential("{not json")
+
+    def test_developer_role_becomes_system(self):
+        import json as _json
+        import workbuddy
+        body = workbuddy.build_chat_body(
+            [{"role": "developer", "content": "x"},
+             {"role": "user", "content": "y"}], "m")
+        self.assertEqual([m["role"] for m in _json.loads(body)["messages"]],
+                         ["system", "user"])
+
+    def test_tool_choice_object_becomes_name(self):
+        import json as _json
+        import workbuddy
+        body = workbuddy.build_chat_body(
+            [{"role": "user", "content": "y"}], "m",
+            parameters={"tool_choice": {"type": "function",
+                                        "function": {"name": "ping"}}})
+        self.assertEqual(_json.loads(body)["tool_choice"], "ping")
+
+    def test_brand_leadin_scrubbed_but_body_kept(self):
+        import workbuddy
+        text = ("You are Claude Code, Anthropic's official CLI for Claude.\n"
+                "# Tone\nBe concise.")
+        out = workbuddy._scrub_brand_claims(text)
+        self.assertNotIn("Claude Code", out)
+        self.assertIn("Be concise.", out)
+        # 只改开头那一段，正文里的其它内容不能动
+        self.assertEqual(workbuddy._scrub_brand_claims("Be concise."), "Be concise.")
+
+    def test_machine_id_is_stable_per_account(self):
+        import workbuddy
+        a = workbuddy._machine_id("u-1")
+        self.assertEqual(a, workbuddy._machine_id("u-1"))
+        self.assertNotEqual(a, workbuddy._machine_id("u-2"))
+
+    def test_catalog_entries_are_complete(self):
+        import workbuddy
+        models = workbuddy.list_models({})
+        self.assertTrue(models)
+        for m in models:
+            self.assertTrue(m["id"])
+            self.assertTrue(m["name"])
+            self.assertGreater(m["context_length"], 0)
+
+
+class WorkbuddyQuotaShapeTest(unittest.TestCase):
+    """额度分组要归成三块：套餐 = plan_base + plan_bonus，赠送 = addon + benefit。"""
+
+    def test_groups_are_folded(self):
+        import workbuddy
+        payload = {
+            "code": 0,
+            "data": {
+                "TotalCredits": "2100",
+                "SubscriptionPackageName": "体验版",
+                "CreditGroups": [
+                    {"Kind": "plan_base", "CycleTotalCapacity": "500",
+                     "CycleUsedCapacity": "100"},
+                    {"Kind": "plan_bonus", "CycleTotalCapacity": "100",
+                     "CycleUsedCapacity": "0"},
+                    {"Kind": "addon", "CycleTotalCapacity": "200",
+                     "CycleUsedCapacity": "50"},
+                    {"Kind": "benefit", "CycleTotalCapacity": "1300",
+                     "CycleUsedCapacity": "0"},
+                ],
+            },
+        }
+        import json as _json
+        with mock.patch.object(workbuddy, "_request",
+                               return_value=(200, _json.dumps(payload).encode())):
+            q = workbuddy.fetch_quota({"region": "cn", "access_token": "t"})
+        self.assertEqual(q["base_total"], 600)
+        self.assertEqual(q["base_used"], 100)
+        self.assertEqual(q["addon_total"], 1500)
+        self.assertEqual(q["addon_used"], 50)
+        self.assertEqual(q["total"], 2100)
+        self.assertEqual(q["used"], 150)
+        self.assertEqual(q["remaining"], 1950)
+        self.assertEqual(q["plan"], "体验版")
+
+    def test_upstream_error_surfaces(self):
+        import workbuddy
+        with mock.patch.object(workbuddy, "_request",
+                               return_value=(403, b'{"code":1}')):
+            with self.assertRaises(workbuddy.UpstreamError):
+                workbuddy.fetch_quota({"region": "cn", "access_token": "t"})
+
+
+class WorkbuddySsePassThroughTest(unittest.TestCase):
+    """WorkBuddy 的 SSE 没有信封，帧本身就是 OpenAI chunk。"""
+
+    def test_plain_chunks_pass_through(self):
+        import convert
+        lines = [
+            'data: {"id":"c1","choices":[{"delta":{"content":"你"}}]}',
+            '',
+            'data: {"id":"c1","choices":[{"delta":{"content":"好"}}],'
+            '"usage":{"prompt_tokens":3,"completion_tokens":1,"credit":0.5}}',
+            'data: [DONE]',
+        ]
+        holder = {}
+        chunks = list(convert.iter_chunks(iter(lines), holder))
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(holder["credits"], 0.5)
+        out = convert.aggregate(iter(lines), "m", {})
+        self.assertEqual(out["choices"][0]["message"]["content"], "你好")
+
+    def test_qoder_envelope_still_works(self):
+        import convert
+        inner = '{"choices":[{"delta":{"content":"hi"}}],"usage":{"credits":1.5}}'
+        lines = ['data: {"body": %s, "statusCodeValue": 200}'
+                 % __import__("json").dumps(inner)]
+        holder = {}
+        chunks = list(convert.iter_chunks(iter(lines), holder))
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(holder["credits"], 1.5)

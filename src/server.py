@@ -504,6 +504,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._auth_admin():
                     return
                 return self._add_account()
+            if path == "/api/accounts/import":
+                if not self._auth_admin():
+                    return
+                return self._import_accounts()
             if path == "/api/accounts/action":
                 if not self._auth_admin():
                     return
@@ -899,8 +903,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------- 管理接口实现 ----------------
 
-    def _add_account(self):
-        body = self._read_json()
+    def _add_account(self, body: dict | None = None):
+        body = self._read_json() if body is None else body
         prov = providers.get(body.get("provider") or providers.DEFAULT_PROVIDER)
         credential = (body.get("credential") or body.get("pat") or "").strip()
         region = (body.get("region") or next(iter(prov.regions))).strip()
@@ -924,6 +928,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "credential_rejected", str(e))
         if not info.get("uid"):
             return self._error(400, "uid_missing", "无法获取账号 UID")
+        # 适配器可能从凭证里读出真实区域（WorkBuddy 的导出文件带 domain），
+        # 与界面上选的不一致时以凭证为准
+        region = info.get("region") or region
 
         account_id = get_store().add_account(
             provider=prov.slug, uid=info["uid"], region=region,
@@ -944,6 +951,97 @@ class Handler(BaseHTTPRequestHandler):
             "name": info.get("name", ""), "region": region,
             "provider": prov.slug,
         }})
+
+    def _import_accounts(self):
+        """从导出的账号文件批量接入。
+
+        body: {"provider": "workbuddy", "files": [{"name": "cockpit-xxx.json",
+               "content": "<文件原文>"}, ...]}
+
+        一个 cockpit 文件里可能有多条账号，所以逐个接；单个失败不影响其余，
+        结果逐条返回，前端能看出哪条进来了、哪条为什么没进来。
+        """
+        body = self._read_json()
+        slug = (body.get("provider") or providers.DEFAULT_PROVIDER).strip()
+        prov = providers.get(slug)
+        if not prov.available:
+            return self._error(400, "provider_pending",
+                               f"{prov.label} 的接入协议尚未实现")
+        files = body.get("files")
+        if not isinstance(files, list) or not files:
+            return self._error(400, "bad_request", "请选择要导入的文件")
+
+        results = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "未命名文件")
+            content = item.get("content")
+            if isinstance(content, (dict, list)):
+                content = json.dumps(content, ensure_ascii=False)
+            content = str(content or "")
+            if not content.strip():
+                results.append({"file": name, "ok": False, "error": "文件是空的"})
+                continue
+            # 一个文件可能是单账号对象，也可能是数组
+            entries = []
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError as e:
+                results.append({"file": name, "ok": False,
+                                "error": f"不是合法 JSON：{e.msg}"})
+                continue
+            if isinstance(parsed, list):
+                entries = parsed
+            else:
+                entries = [parsed]
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                label = name if len(entries) == 1 else f"{name} #{len(results) + 1}"
+                payload = {"provider": prov.slug,
+                           "region": (body.get("region") or "").strip(),
+                           "credential": json.dumps(entry, ensure_ascii=False)}
+                result = self._accept_account(payload)
+                results.append({"file": label, **result})
+        imported = sum(1 for r in results if r.get("ok"))
+        return self._send_json(200, {
+            "results": results, "imported": imported,
+            "failed": len(results) - imported,
+            "accounts": self._accounts_view(),
+        })
+
+    def _accept_account(self, payload: dict) -> dict:
+        """接一个账号，返回 {ok, uid, name, error}。不改 HTTP 状态。"""
+        prov = providers.get(payload.get("provider") or providers.DEFAULT_PROVIDER)
+        credential = (payload.get("credential") or "").strip()
+        region = (payload.get("region") or "").strip() or next(iter(prov.regions))
+        if region not in prov.regions:
+            return {"ok": False, "error": f"{prov.label} 没有这个区域：{region}"}
+        try:
+            info = prov.connect(credential, region)
+        except providers.Unsupported as e:
+            return {"ok": False, "error": str(e)}
+        except qoder.UpstreamError as e:
+            return {"ok": False, "error": str(e)[:300]}
+        if not info.get("uid"):
+            return {"ok": False, "error": "无法获取账号 UID"}
+        region = info.get("region") or region
+        account_id = get_store().add_account(
+            provider=prov.slug, uid=info["uid"], region=region,
+            credential=credential, email=info.get("email", ""),
+            name=info.get("name", ""),
+        )
+        expires_at = time.time() + int(info.get("expires_in") or 86400)
+        get_store().set_account_tokens(
+            account_id, info.get("access_token", ""),
+            info.get("refresh_token", ""), expires_at)
+        acc = get_store().get_account(account_id)
+        quota = sync_account_credits(acc) if acc else None
+        clear_model_cache()
+        return {"ok": True, "account_id": account_id, "uid": info["uid"],
+                "name": info.get("name") or info["uid"][:8], "region": region,
+                "quota": quota}
 
     def _account_action(self):
         body = self._read_json()
@@ -1046,9 +1144,9 @@ class Handler(BaseHTTPRequestHandler):
             limit_daily=float(body.get("limit_daily") or 0),
             limit_weekly=float(body.get("limit_weekly") or 0),
             preferred_account_id=body.get("preferred_account_id") or None,
-            model_allowlist=(body.get("model_allowlist")
-                             if body.get("model_allowlist") is not None
-                             else "qfmodel,gfmodel,dfmodel"),
+            # 不传可用模型就是「不限」。以前默认写死 Qoder 的三个 Flash 档，
+            # 账号来自别的厂商时新成员一上手就被判 model_forbidden。
+            model_allowlist=body.get("model_allowlist") or "",
             note=(body.get("note") or "").strip(),
             username=username or None,
             password=password or None,

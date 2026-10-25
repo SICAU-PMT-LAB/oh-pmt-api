@@ -2,9 +2,9 @@
 
 把订阅制 AI 账号的额度封装成 OpenAI 兼容 API，通过 API Key 分发给多人使用，并支持按 Key 限制积分用量、IP 来源和模型。
 
-账号来源按厂商建模（`src/providers.py`）。Qoder 是当前唯一实现完整协议的厂商，
-文档里这部分协议细节仍然有效；WorkBuddy / Cline / CommandCode 注册为待接入，
-新增一家只需要在注册表里补一个适配器。
+账号来源按厂商建模（`src/providers.py`）。Qoder 与 WorkBuddy 已经实现完整协议，
+下面 Qoder 那部分协议细节仍然有效，WorkBuddy 的协议单独记在 `### WorkBuddy` 一节；
+Cline / CommandCode 注册为待接入，新增一家只需要在注册表里补一个适配器。
 
 ## 为什么做这个
 
@@ -68,6 +68,47 @@ PAT（`pt-`）本身是长期令牌，但换来的 job token（`jt-`）只有 24
 
 AES key 只有 64 bit 熵且 key == IV，RSA 公钥实测 1024 位。`qoder_sign.py` 明确记录这一点并拒绝单方面修改，理由是必须与服务端解包结果逐字节一致，改动即协议不兼容。
 
+### WorkBuddy（腾讯 CodeBuddy）
+
+推理接口本身就是 OpenAI 兼容的，不需要协议转换：`POST {api}/v2/chat/completions`，
+请求体字段与 OpenAI 一致，响应是标准 SSE（`data: {...}` + `data: [DONE]`），
+最后一帧的 `usage.credit` 是本轮消耗的积分。
+
+| 区域 | 推理 / 签到 | 积分与用量 |
+|---|---|---|
+| 国内版 | `https://copilot.tencent.com` | `https://www.codebuddy.cn` |
+| 国际版 | `https://www.workbuddy.ai` | `https://www.workbuddy.ai` |
+
+真实差异只有三处，都在 `src/workbuddy.py` 里处理：
+
+1. **客户端标识**。上游按请求头判断调用方，缺了返回 11128「Illegal API invocation from
+   an unapproved channel」。需要 `X-Product-Code: codebuddy` 加 `X-Domain`（导出文件里的
+   domain），`X-Machine-Id` 按 uid 做 uuid5 派生并保持稳定，其余 IDE 版本号上游不校验。
+   国际版另有一道渠道校验：`X-Conversation-ID` / `X-Conversation-Request-ID` /
+   `X-Conversation-Message-ID` 三个头必须同时出现。
+2. **类型约束**。上游是 Go 服务：`role=developer` 会整条请求被拦，要先转成 `system`；
+   object 形式的 `tool_choice` 反序列化失败，要换成等价的函数名字符串。
+3. **品牌声明**。system prompt 里出现 `You are Claude Code, Anthropic's official CLI`
+   这句原文会被拦（同样返回 11128 要求重发）。只改这一句开头为等价的角色描述，
+   正文一字不动，长模板（pi 的 harness prompt、Claude Code 的完整 system prompt）
+   改造后实测通过。
+
+凭证是官方客户端导出的文件，两种形状都认：`workbuddy-<uid>.json` 是
+`{account, auth}` 对象，`cockpit-<uid>.json` 是这种对象组成的数组。区域由 `auth.domain`
+决定，不看界面上的选择。续期走 `POST {api}/v2/plugin/auth/token/refresh`，带
+`X-Refresh-Token` 与 `X-Auth-Refresh-Source: plugin`，返回 `expiresIn`（秒）。
+
+积分：`POST {web}/billing/meter/get-user-resource-summary`，返回 `TotalCredits` 与
+`CreditGroups`（`plan_base` / `plan_bonus` / `addon` / `benefit`）。归成三块上报：
+套餐 = plan_base + plan_bonus，赠送 = addon + benefit，个人号没有共享池。
+
+签到：国内版 `POST {api}/v2/billing/meter/daily-checkin`（先查
+`checkin-activity-status`，已签就不重复提交），国际版没有这个活动，返回「签到活动未开放」。
+
+模型目录：上游没有公开的列表接口（官方插件读的是下发到客户端的产品配置），所以
+`CATALOG` 是一张人工维护的表——2026-10-25 用真实账号逐个发过对话确认可用的集合。
+账号套餐不同，可用集合会有出入，缺模型时按需增删。
+
 ## 风控边界（必须写进文档告知使用者）
 
 参考项目 `docs/risk-control-playbook.md` §0 的三条硬约束，本项目沿用同一判断：
@@ -84,17 +125,18 @@ AES key 只有 64 bit 熵且 key == IV，RSA 公钥实测 1024 位。`qoder_sign
 
 - 多厂商账号模型：账号带 provider 列，调度不会跨厂商
 - PAT 导入多个 Qoder 账号（国际版 / 国内版分别管理）
+- 账号文件导入多个 WorkBuddy 账号（workbuddy / cockpit 两种导出文件）
 - 账号池轮询、故障冷却换号、token 自动刷新
 - 生成 API Key 分发给多人
 - **按 Key 限制 token 用量**（参考项目缺失）
 - **按 Key 限制 IP 来源**（参考项目缺失）
 - **按 Key 限制可用模型**（参考项目缺失，它的 `key_allows_model` 是全局的）
 - OpenAI 兼容 `/v1/chat/completions` 和 `/v1/models`
-- 管理界面：Anthropic 设计风格，衬线体
+- 管理界面：白底金边 / 黑底金边双主题，Serif 标题配等宽数字
 
 不做：
 
-- 签到、活动领取
+- 活动中心的成长任务、抽奖、兑换（只做每日签到）
 - Anthropic Messages 协议桥接
 - Responses API
 - 多区域自动选区（按账号所属区域路由即可）

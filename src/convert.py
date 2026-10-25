@@ -1,9 +1,15 @@
-"""把 Qoder 上游的 SSE 信封流转换成 OpenAI 兼容格式。
+"""把上游的 SSE 流转换成 OpenAI 兼容格式。
 
-上游帧形态（关键发现：内层已经是 OpenAI chunk，只需拆信封）：
+有两种上游形态，这里都认：
+
+Qoder —— 外面套一层信封，内层已经是 OpenAI chunk：
     data:{"headers":{...},"body":"<内层 OpenAI chunk 的 JSON 字符串>","statusCodeValue":200}
     data:{"body":"[DONE]"}
     event:finish{...}   ← 计时元数据，忽略
+
+WorkBuddy 这类 OpenAI 兼容上游 —— 帧本身就是 chunk，没有信封：
+    data:{"id":"...","choices":[{"delta":{...}}]}
+    data: [DONE]
 """
 
 from __future__ import annotations
@@ -20,6 +26,22 @@ class UpstreamStatusError(Exception):
         super().__init__(f"upstream status {status}: {str(body)[:200]}")
 
 
+def _take_usage(usage: dict, holder: dict) -> None:
+    """记下最后一帧的 usage。
+
+    Qoder 的字段叫 credits，WorkBuddy 叫 credit，两者都可能带原始价。
+    """
+    holder["usage"] = usage
+    for key in ("credits", "credit"):
+        if usage.get(key) is not None:
+            holder["credits"] = float(usage[key])
+            break
+    for key in ("original_credits", "original_credit"):
+        if usage.get(key) is not None:
+            holder["credits_original"] = float(usage[key])
+            break
+
+
 def _data_of(line: str) -> str:
     if not line.startswith("data:"):
         return ""
@@ -32,11 +54,24 @@ def iter_chunks(lines, usage_holder: dict | None = None):
         payload = _data_of(line)
         if not payload:
             continue
+        if payload == "[DONE]":
+            return
         try:
             outer = json.loads(payload)
         except json.JSONDecodeError:
             continue
         if not isinstance(outer, dict):
+            continue
+
+        # 没有信封的直出富 chunk：原样当内层用
+        if not isinstance(outer.get("body"), str):
+            if "statusCodeValue" in outer or "headers" in outer:
+                continue
+            if outer.get("choices") is not None or outer.get("error") is not None:
+                usage = outer.get("usage")
+                if usage and usage_holder is not None:
+                    _take_usage(usage, usage_holder)
+                yield payload
             continue
 
         status = outer.get("statusCodeValue")
@@ -59,12 +94,7 @@ def iter_chunks(lines, usage_holder: dict | None = None):
         if isinstance(inner, dict) and usage_holder is not None:
             usage = inner.get("usage")
             if usage:
-                # 上游在最后一帧给出 usage，含本次消耗的 credits（积分）
-                usage_holder["usage"] = usage
-                if usage.get("credits") is not None:
-                    usage_holder["credits"] = float(usage["credits"])
-                if usage.get("original_credits") is not None:
-                    usage_holder["credits_original"] = float(usage["original_credits"])
+                _take_usage(usage, usage_holder)
         yield body
 
 
@@ -131,6 +161,6 @@ def aggregate(lines, model: str, usage_holder: dict | None = None) -> dict:
             "prompt_tokens": int(usage.get("prompt_tokens") or 0),
             "completion_tokens": int(usage.get("completion_tokens") or 0),
             "total_tokens": int(usage.get("total_tokens") or 0),
-            "credits": float(usage.get("credits") or 0),
+            "credits": float((usage_holder or {}).get("credits") or 0),
         },
     }

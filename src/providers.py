@@ -1,18 +1,21 @@
 """账号来源厂商的注册表与适配器。
 
 一个厂商就是一组能力：怎么用长期凭证换出可用的调用凭据、怎么列模型、
-怎么发一轮对话、怎么读额度。Qoder 已经把完整协议实现好了（qoder.py），
-这里只把它包成适配器；WorkBuddy / Cline / CommandCode 的协议还没拿到，
-注册成 PROVIDERS 里带 available=False 的条目，界面就能按厂商分区显示
+怎么发一轮对话、怎么读额度。Qoder 与 WorkBuddy 已经把完整协议实现好了
+（qoder.py / workbuddy.py），这里把它们包成适配器；Cline / CommandCode
+的协议还没拿到，注册成 available=False 的条目，界面按厂商分区显示
 「待接入」，补协议时只需要在这里加一个类。
 
-厂商与区域的关系：Qoder 有国际版和国内版两套端点，其他厂商目前只按
-一个区域处理，接入时按实际端点填 REGIONS 即可。
+厂商与区域的关系：Qoder 和 WorkBuddy 都有国内版和国际版两套端点，两套
+凭证互不通用，所以区域是厂商自己的能力，由各个 Provider 自己声明。
 """
 
 from __future__ import annotations
 
+import time
+
 import qoder
+import workbuddy
 
 
 class Unsupported(Exception):
@@ -140,6 +143,81 @@ class QoderProvider(Provider):
         return qoder.checkin_account(account)
 
 
+class WorkbuddyProvider(Provider):
+    """WorkBuddy（腾讯 CodeBuddy）适配器。
+
+    与 Qoder 不同，凭证不是一个短 token，而是官方面板导出的 JSON 文件
+    （workbuddy-<uid>.json 或数组形式的 cockpit-<uid>.json）。文件里带
+    access / refresh token，刷新走 /v2/plugin/auth/token/refresh。
+    """
+
+    slug = "workbuddy"
+    label = "WorkBuddy"
+    short = "WorkBuddy"
+    color = "#2f6b6b"
+    credential_prefix = ""
+    credential_hint = "workbuddy-<uid>.json 或 cockpit-<uid>.json 的内容"
+    credential_url = ""
+    available = True
+    supports_checkin = True
+    regions = {rid: {"label": info["label"]}
+               for rid, info in workbuddy.REGIONS.items()}
+
+    def connect(self, credential: str, region: str) -> dict:
+        info = workbuddy.parse_credential(credential)
+        # 文件里带了 domain 就以它为准：导出文件的区域比界面上选的可信
+        want = workbuddy.detect_region(info.get("domain"), region) if info.get("domain") else region
+        account = {"uid": info["uid"], "region": want,
+                   "access_token": info["access_token"], "domain": info.get("domain")}
+        if info.get("access_token"):
+            # 先直接拿这个 token 查额度，能查到说明它还有效，不用刷新
+            try:
+                workbuddy.fetch_quota(account)
+            except workbuddy.UpstreamError:
+                info["access_token"] = ""
+        if not info.get("access_token"):
+            if not info.get("refresh_token"):
+                raise workbuddy.UpstreamError(0, "", "凭证已失效，请重新导出")
+            fresh = workbuddy.refresh({**account, "refresh_token": info["refresh_token"]})
+            if not fresh:
+                raise workbuddy.UpstreamError(0, "", "凭证已失效，请重新导出")
+            info["access_token"] = fresh["access_token"]
+            info["refresh_token"] = fresh["refresh_token"]
+        expires_in = 2592000
+        if info.get("expires_at"):
+            expires_in = max(60, int(info["expires_at"] - time.time()))
+        return {
+            "uid": info["uid"],
+            "email": "", "name": info.get("nickname") or info["uid"][:8],
+            "region": want,
+            "access_token": info["access_token"],
+            "refresh_token": info.get("refresh_token") or "",
+            "expires_in": expires_in,
+            "domain": info.get("domain") or "",
+        }
+
+    def refresh(self, account: dict) -> dict | None:
+        return workbuddy.refresh(account)
+
+    def list_models(self, account: dict) -> list[dict]:
+        return workbuddy.list_models(account)
+
+    def chat_stream(self, account: dict, body: bytes, model: str):
+        return workbuddy.chat_stream(account, body, model)
+
+    def build_chat_body(self, messages, model, *, stream=True, tools=None,
+                        parameters=None, meta=None):
+        return workbuddy.build_chat_body(messages, model, stream=stream,
+                                         tools=tools, parameters=parameters,
+                                         meta=meta)
+
+    def fetch_quota(self, account: dict) -> dict:
+        return workbuddy.fetch_quota(account)
+
+    def checkin(self, account: dict) -> dict:
+        return workbuddy.checkin(account)
+
+
 class PendingProvider(Provider):
     """协议还没接入的厂商。占位，让界面能按厂商分区并给出接入指引。"""
 
@@ -153,14 +231,6 @@ class PendingProvider(Provider):
 
     def list_models(self, account: dict) -> list[dict]:
         return []
-
-
-class WorkbuddyProvider(PendingProvider):
-    slug = "workbuddy"
-    label = "WorkBuddy"
-    color = "#2f6b6b"
-    credential_hint = "API Key"
-    credential_url = "https://www.workbuddy.ai/"
 
 
 class ClineProvider(PendingProvider):

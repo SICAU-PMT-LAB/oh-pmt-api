@@ -104,6 +104,7 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="primary" onclick="openAccountModal()">接入账号</button>
+          <button onclick="openImportModal()">导入文件</button>
           <button onclick="checkinAll(this)">一键签到</button>
           <button class="ghost" onclick="syncAll(this)">同步额度</button>
         </div>
@@ -313,12 +314,38 @@
     <div class="field">
       <label id="a-cred-label">凭证</label>
       <input id="a-cred" type="password" placeholder="pt-...">
+      <textarea id="a-cred-text" rows="5" style="display:none"
+        placeholder="把导出的 JSON 整个粘进来，或直接用上面的「导入文件」"></textarea>
       <div class="hint" id="a-cred-hint"></div>
     </div>
     <div class="note" id="a-provider-note" style="display:none"></div>
     <div class="modal-actions">
       <button onclick="closeModal('account-modal')">取消</button>
       <button class="primary" onclick="addAccount(this)">校验并接入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── 导入账号文件 ───────── -->
+<div class="modal-mask" id="import-modal">
+  <div class="modal">
+    <h3>导入账号文件</h3>
+    <p class="hint" style="margin-top:-4px">
+      直接选官方导出的文件，不用改内容也不用合并。一次可以选多个。
+    </p>
+    <div class="field">
+      <label>来源厂商</label>
+      <div class="chip-picker" id="i-providers" style="max-height:none"></div>
+    </div>
+    <div class="field">
+      <label>文件</label>
+      <input id="i-files" type="file" accept=".json,application/json" multiple>
+      <div class="hint" id="i-hint"></div>
+    </div>
+    <div id="i-result"></div>
+    <div class="modal-actions">
+      <button onclick="closeModal('import-modal')">关闭</button>
+      <button class="primary" onclick="importFiles(this)">导入</button>
     </div>
   </div>
 </div>
@@ -572,10 +599,13 @@ function renderVendor(slug) {
       : '<span class="pill ok"><span class="dot"></span>可用</span>';
     const expire = a.credits_expire_at
       ? new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN') : '不过期';
+    // 有些厂商没有邮箱（WorkBuddy 导出的就是昵称），空片段不要留出多余的分隔点
+    const meta = [a.email, a.region_label, a.uid ? 'UID ' + String(a.uid).slice(0, 8) : '']
+      .filter(Boolean).map(esc).join(' · ');
     return `<div class="account-row" style="grid-template-columns:1.5fr 1.1fr 1fr auto">
       <div>
         <div class="an">${esc(a.name || a.email || a.uid)}</div>
-        <div class="as">${esc(a.email)} · ${esc(a.region_label)}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
+        <div class="as">${meta}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
         <div class="as">${a.bound_members.length ? '绑定 ' + a.bound_members.map(esc).join('、') : '未绑定成员'}</div>
       </div>
       <div>
@@ -689,15 +719,29 @@ function selectProvider(slug) {
     `<option value="${r.id}">${esc(r.label)}</option>`).join('');
   document.getElementById('a-region-field').style.display =
     (prov.regions || []).length > 1 ? '' : 'none';
+  // Qoder 用一行 PAT；WorkBuddy 的凭证是导出的 JSON 文件，整份粘进来
+  const asFile = prov.credential_prefix === '';
+  const single = document.getElementById('a-cred');
+  const multi = document.getElementById('a-cred-text');
+  single.style.display = asFile ? 'none' : '';
+  multi.style.display = asFile ? '' : 'none';
+  multi.value = '';
+  single.value = '';
+  single.placeholder = prov.credential_hint || '';
   document.getElementById('a-cred-label').textContent =
-    prov.slug === 'qoder' ? 'Personal Access Token' : 'API Key';
-  document.getElementById('a-cred').placeholder = prov.credential_hint || '';
-  document.getElementById('a-cred').value = '';
-  document.getElementById('a-cred-hint').innerHTML =
-    prov.credential_url
-      ? `在 <a href="${esc(prov.credential_url)}" target="_blank" rel="noopener"
-           style="color:var(--gold)">${esc(prov.credential_url)}</a> 创建`
-      : (prov.credential_hint || '');
+    prov.slug === 'qoder' ? 'Personal Access Token'
+      : asFile ? '账号文件内容' : 'API Key';
+  // 凭证不是自己申请的那类（WorkBuddy 是从官方客户端导出），提示要写清导出方式
+  document.getElementById('a-cred-hint').innerHTML = asFile
+    ? `在官方客户端里登录后导出账号文件，${
+        prov.credential_url
+          ? `参见 <a href="${esc(prov.credential_url)}" target="_blank" rel="noopener"
+               style="color:var(--gold)">${esc(prov.credential_url)}</a>`
+          : ''}；也可以点上面的「导入文件」直接选。`
+    : (prov.credential_url
+        ? `在 <a href="${esc(prov.credential_url)}" target="_blank" rel="noopener"
+             style="color:var(--gold)">${esc(prov.credential_url)}</a> 创建`
+        : (prov.credential_hint || ''));
   const note = document.getElementById('a-provider-note');
   if (!prov.available) {
     note.style.display = '';
@@ -708,6 +752,79 @@ function selectProvider(slug) {
   document.getElementById('a-cred').dataset.provider = slug;
 }
 
+/* ───────── 导入官方导出的账号文件 ───────── */
+const IMPORT_HINTS = {
+  workbuddy: 'workbuddy-<uid>.json 或 cockpit-<uid>.json（数组也可以）',
+  qoder: '一个 pt- 开头的 PAT 文本文件，或直接粘贴',
+};
+
+let IMPORT_PROVIDER = 'workbuddy';
+
+function renderImportPicker() {
+  const box = document.getElementById('i-providers');
+  box.innerHTML = PROVIDERS.map(p => `
+    <button type="button" class="chip ${p.slug === IMPORT_PROVIDER ? 'on' : ''}"
+      data-iprov="${p.slug}"
+      style="${p.slug === IMPORT_PROVIDER ? `border-color:${p.color};color:${p.color}` : ''}">
+      <span class="tick">✓</span>${esc(p.label)}
+      <span class="chip-prov">${p.available ? '可用' : '待接入'}</span>
+    </button>`).join('');
+  box.querySelectorAll('[data-iprov]').forEach(b => b.addEventListener('click', () => {
+    IMPORT_PROVIDER = b.dataset.iprov;
+    renderImportPicker();
+    document.getElementById('i-hint').textContent =
+      IMPORT_HINTS[IMPORT_PROVIDER] || '官方导出的 JSON 文件';
+  }));
+  document.getElementById('i-hint').textContent =
+    IMPORT_HINTS[IMPORT_PROVIDER] || '官方导出的 JSON 文件';
+}
+
+window.openImportModal = () => {
+  IMPORT_PROVIDER = (PROVIDERS.find(p => p.available) || PROVIDERS[0] || {}).slug || 'workbuddy';
+  document.getElementById('i-result').innerHTML = '';
+  document.getElementById('i-files').value = '';
+  renderImportPicker();
+  openModal('import-modal');
+};
+
+window.importFiles = async (btn) => {
+  const input = document.getElementById('i-files');
+  const files = [...(input.files || [])];
+  if (!files.length) { toast('先选文件', 'err'); return; }
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const payload = await Promise.all(files.map(async f => ({
+      name: f.name, content: await f.text(),
+    })));
+    const res = await api('/api/accounts/import', { method: 'POST',
+      body: JSON.stringify({ provider: IMPORT_PROVIDER, files: payload }) });
+    document.getElementById('i-result').innerHTML = `
+      <div class="card" style="border-color:var(--gold-line)">
+        <h3 class="section">导入结果 · 成功 ${res.imported}，失败 ${res.failed}</h3>
+        ${res.results.map(r => `<div class="checkin-line ${r.ok ? 'ok' : 'err'}">
+          ${r.ok ? '✓' : '✕'} <b>${esc(r.file)}</b>　
+          ${r.ok
+            ? esc(`${r.name || ''}${r.region ? ' · ' + regionLabel(r.region) : ''}` +
+                  (r.quota ? ` · 剩余 ${Number(r.quota.remaining).toFixed(1)} 积分` : ''))
+            : esc(r.error || '未知错误')}</div>`).join('')}
+      </div>`;
+    toast(`导入 ${res.imported} 个账号`, res.failed ? 'err' : '');
+    await loadAccounts();
+    loadOverview();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+  btn.textContent = '导入';
+};
+
+function regionLabel(id) {
+  for (const p of PROVIDERS) {
+    const hit = (p.regions || []).find(r => r.id === id);
+    if (hit) return `${p.label} · ${hit.label}`;
+  }
+  return id;
+}
+
 window.openAccountModal = () => {
   const first = PROVIDERS.find(p => p.available) || PROVIDERS[0];
   if (first) selectProvider(first.slug);
@@ -715,7 +832,9 @@ window.openAccountModal = () => {
 };
 
 window.addAccount = async (btn) => {
-  const cred = document.getElementById('a-cred').value.trim();
+  const single = document.getElementById('a-cred');
+  const multi = document.getElementById('a-cred-text');
+  const cred = (multi.style.display === 'none' ? single.value : multi.value).trim();
   const provider = document.getElementById('a-cred').dataset.provider || 'qoder';
   const region = document.getElementById('a-region').value;
   if (!cred) { toast('请填写凭证', 'err'); return; }
