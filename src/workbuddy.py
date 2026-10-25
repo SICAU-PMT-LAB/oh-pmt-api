@@ -378,22 +378,36 @@ def list_models(account: dict) -> list[dict]:
             for mid, name, ctx, out, tools, images in CATALOG]
 
 
-# 上游拒绝的客户端声明。实测只拦这一句（换任何其它说法都放行），命中时
-# 换成等价的角色描述：它对模型的行为约束不变，只是不再自称是别家的客户端。
+# 上游的渠道校验按「system 消息开头那一段」匹配客户端模板，命中就整条请求
+# 返回 11128，提示「不是官方客户端发出的」。实测规律：
+#   - 只在 system 消息的开头匹配，前面多一个空格、空行或别的句子就不再命中；
+#   - 放在 user 消息里从不命中；
+#   - 与模型无关（所有模型一样拦），与 tools 无关。
+# 所以这里只改开头那段的自称，正文一字不动。等价描述保住了「你是什么角色」
+# 这层信息，只是不再自称是别家的客户端。
 _BRAND_LEADINS = (
     re.compile(r"You are Claude Code[^\n]*", re.IGNORECASE),
     re.compile(r"You are (?:the )?Anthropic[^\n]*official[^\n]*", re.IGNORECASE),
+    # 各家 harness 的通用模板：「You are an AI agent powered by <X> Harness」
+    re.compile(r"You are (?:an? )?(?:AI |coding )?agent powered by [^\n]*Harness[^\n]*",
+               re.IGNORECASE),
 )
 _BRAND_REPLACEMENT = "You are a coding assistant working with the user in their editor."
 
 
 def _scrub_brand_claims(text: str) -> str:
-    """去掉上游会拦的客户端品牌声明。只动开头这段，不碰正文。"""
+    """改掉上游会拦的客户端自称。只动开头这一段，不碰正文。
+
+    上游的匹配锚在开头，正文里出现同样的句子不会被拦，所以也只改开头：
+    用户 prompt 里提到的产品名不该被网关悄悄改写。
+    """
     if not isinstance(text, str) or not text:
         return text
-    out = text
+    out = text.lstrip("\n")
     for pattern in _BRAND_LEADINS:
-        out = pattern.sub(_BRAND_REPLACEMENT, out, count=1)
+        match = pattern.match(out)
+        if match:
+            return _BRAND_REPLACEMENT + out[match.end():]
     return out
 
 
@@ -430,6 +444,40 @@ def _normalize_messages(messages: list) -> list[dict]:
     return out
 
 
+# 上游只认 none/low/medium/high 这几档（minimal 也接受，行为接近 low）。
+_EFFORT_ALIASES = {
+    "off": "none", "disabled": "none", "false": "none", "0": "none",
+    "minimal": "low", "minimum": "low", "light": "low",
+    "mid": "medium", "normal": "medium", "default": "medium",
+    "max": "high", "maximum": "high", "xhigh": "high", "highest": "high",
+}
+
+
+def _normalize_effort(params: dict) -> str | None:
+    """从客户端的几种常见写法里取思考档位。
+
+    各家 harness 写法不统一：OpenAI 是 reasoning_effort，Anthropic 风格是
+    thinking.effort，还有 reasoning.effort、thinking.level 这类。上游只要
+    一个字符串，所以统一收口到这里。
+    """
+    raw = params.get("reasoning_effort")
+    if not raw and isinstance(params.get("reasoning"), dict):
+        raw = params["reasoning"].get("effort")
+    if not raw and isinstance(params.get("thinking"), dict):
+        thinking = params["thinking"]
+        if thinking.get("type") in ("disabled", "off", "none"):
+            return "none"
+        raw = thinking.get("effort") or thinking.get("level")
+        if not raw and thinking.get("type") in ("enabled", "on", "true", True):
+            return "medium"
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, bool):
+        return "medium" if raw else "none"
+    text = str(raw).strip().lower()
+    return _EFFORT_ALIASES.get(text, text) or None
+
+
 def _normalize_tool_choice(value):
     """object 形式的 tool_choice 上游反序列化不了，换成等价的函数名。"""
     if isinstance(value, dict):
@@ -457,13 +505,18 @@ def build_chat_body(messages: list[dict], model: str, *, stream: bool = True,
     if tools:
         body["tools"] = tools
     for key in ("temperature", "top_p", "stop", "presence_penalty",
-                "frequency_penalty", "seed", "response_format", "tool_choice"):
+                "frequency_penalty", "seed", "response_format", "tool_choice",
+                "reasoning", "thinking"):
         if key in params and params[key] is not None:
             body[key] = params[key]
     if "tool_choice" in body:
         body["tool_choice"] = _normalize_tool_choice(body["tool_choice"])
-    # reasoning_effort 等思考档位上游按模型白名单处理，不认识的会被忽略，
-    # 目录里没有 thinking_config，所以这里不下发，避免和客户端期望不一致。
+    # 思考档位：上游认 reasoning_effort，不传就完全不思考（实测同一道题，
+    # 不传时 0 个思考字符，传任意档位都有思考）。上游对不认识的档位不报错，
+    # 所以这里只把客户端的写法归一化，不做白名单裁剪。
+    effort = _normalize_effort(params)
+    if effort:
+        body["reasoning_effort"] = effort
     return json.dumps(body, ensure_ascii=False).encode()
 
 

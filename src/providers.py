@@ -40,6 +40,10 @@ class Provider:
     regions: dict[str, dict] = {}
     # 是否支持每日签到领额度
     supports_checkin = False
+    # 是否需要把客户端原样的 thinking / reasoning 对象转给上游。
+    # 直通型上游（WorkBuddy）需要，因为 {"type": "enabled"} 这类写法
+    # 本身就是一个档位信息；Qoder 的参数表是封闭的，多塞键会被拒。
+    wants_effort_objects = False
 
     # ---- 协议能力 ----
 
@@ -64,6 +68,15 @@ class Provider:
                         stream: bool = True, tools=None,
                         parameters=None, meta=None) -> bytes:
         raise Unsupported(f"{self.label} 还没有接入协议")
+
+    def normalize_effort(self, effort, meta: dict | None = None) -> str | None:
+        """把客户端要的思考档位对齐到该厂商上游认的写法。
+
+        默认按 Qoder 的规则裁剪（它只在模型声明了档位集合时才下发）。
+        WorkBuddy 这类直通上游的实现覆写它：上游对不认识的档位不报错，
+        裁剪反而会让客户端的设置悄悄失效。
+        """
+        return qoder.normalize_effort(effort, meta)
 
     def fetch_quota(self, account: dict) -> dict:
         """额度快照。不支持的厂商返回空快照，界面显示「不统计额度」。"""
@@ -160,6 +173,7 @@ class WorkbuddyProvider(Provider):
     credential_url = ""
     available = True
     supports_checkin = True
+    wants_effort_objects = True
     regions = {rid: {"label": info["label"]}
                for rid, info in workbuddy.REGIONS.items()}
 
@@ -210,6 +224,10 @@ class WorkbuddyProvider(Provider):
         return workbuddy.build_chat_body(messages, model, stream=stream,
                                          tools=tools, parameters=parameters,
                                          meta=meta)
+
+    def normalize_effort(self, effort, meta=None):
+        # 上游自己认 reasoning_effort，不认识的档位静默忽略，不需要本地裁剪
+        return effort or None
 
     def fetch_quota(self, account: dict) -> dict:
         return workbuddy.fetch_quota(account)

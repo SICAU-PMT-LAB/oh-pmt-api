@@ -138,6 +138,21 @@ curl -X POST https://api.example.com/api/accounts/import \
 
 签到只有国内版有（每日 100 积分，`/v2/billing/meter/daily-checkin`），国际版返回「签到活动未开放」。
 
+### 思考强度
+
+客户端怎么写都行，网关统一收口成上游认的 `reasoning_effort`：
+
+```json
+{"reasoning_effort": "high"}
+{"thinking": {"type": "enabled"}}
+{"thinking": {"effort": "low"}}
+{"reasoning": {"effort": "medium"}}
+```
+
+档位是 `off` / `low` / `medium` / `high`，`max`、`minimal`、`default` 这类别名会被归一化。
+
+WorkBuddy 上游**不传这个参数就完全不思考**，所以网关必须透传；Qoder 那边则相反，只在模型声明了档位集合时才下发，两边规则各自在适配器里实现。思考内容通过 `reasoning_content` 字段返回（流式在 `delta.reasoning_content`）。
+
 ### 加一家新厂商
 
 `src/providers.py` 里每个厂商是一个适配器，需要实现：换凭据（`connect`）、续期（`refresh`）、列模型（`list_models`）、发请求（`build_chat_body` + `chat_stream`）、读额度（`fetch_quota`）。把 `available` 改成 `True` 并填上区域，界面上的「待接入」卡片就会变成可用的账号入口。

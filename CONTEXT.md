@@ -88,15 +88,24 @@ AES key 只有 64 bit 熵且 key == IV，RSA 公钥实测 1024 位。`qoder_sign
    `X-Conversation-Message-ID` 三个头必须同时出现。
 2. **类型约束**。上游是 Go 服务：`role=developer` 会整条请求被拦，要先转成 `system`；
    object 形式的 `tool_choice` 反序列化失败，要换成等价的函数名字符串。
-3. **品牌声明**。system prompt 里出现 `You are Claude Code, Anthropic's official CLI`
-   这句原文会被拦（同样返回 11128 要求重发）。只改这一句开头为等价的角色描述，
-   正文一字不动，长模板（pi 的 harness prompt、Claude Code 的完整 system prompt）
-   改造后实测通过。
+3. **客户端自称**。上游按「system 消息开头那段」匹配客户端模板，命中就整条请求
+   返回 11128。实测规律：只在开头匹配（前面多一个空格、空行或别的句子就不命中），
+   放在 user 消息里从不命中，与模型和 tools 都无关。已确认会被拦的写法包括
+   `You are Claude Code, Anthropic's official CLI` 和
+   `You are an AI agent powered by DeepSeek Harness`（后者是 dsh 的模板）。
+   处理方式是只改写开头这段为等价的角色描述，正文一字不动；正文里出现同样的
+   句子不会被拦，所以也不改，避免动到用户的 prompt。
 
 凭证是官方客户端导出的文件，两种形状都认：`workbuddy-<uid>.json` 是
 `{account, auth}` 对象，`cockpit-<uid>.json` 是这种对象组成的数组。区域由 `auth.domain`
 决定，不看界面上的选择。续期走 `POST {api}/v2/plugin/auth/token/refresh`，带
 `X-Refresh-Token` 与 `X-Auth-Refresh-Source: plugin`，返回 `expiresIn`（秒）。
+
+思考档位：上游认 `reasoning_effort`（`none` / `low` / `medium` / `high`），
+**不传就完全不思考**——同一道题实测不传时 0 个思考字符，传任意档位都有。
+所以网关必须透传，不能像 Qoder 那样按模型白名单裁剪。客户端的
+`thinking` / `reasoning` 对象也要原样带上，`{"type": "enabled"}` 本身就是
+一个档位信息（映射成 medium）。
 
 积分：`POST {web}/billing/meter/get-user-resource-summary`，返回 `TotalCredits` 与
 `CreditGroups`（`plan_base` / `plan_bonus` / `addon` / `benefit`）。归成三块上报：

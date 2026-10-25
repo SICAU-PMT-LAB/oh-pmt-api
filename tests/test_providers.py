@@ -428,3 +428,76 @@ class WorkbuddySsePassThroughTest(unittest.TestCase):
         chunks = list(convert.iter_chunks(iter(lines), holder))
         self.assertEqual(len(chunks), 1)
         self.assertEqual(holder["credits"], 1.5)
+
+
+class WorkbuddyEffortTest(unittest.TestCase):
+    """思考档位必须透传：上游不传就完全不思考，裁剪等于让客户端的设置失效。"""
+
+    def test_effort_aliases(self):
+        import workbuddy
+        cases = {
+            "high": "high", "HIGH": "high", "max": "high",
+            "low": "low", "minimal": "low",
+            "medium": "medium", "default": "medium",
+            "off": "none", "disabled": "none", "none": "none",
+            "": None, None: None,
+        }
+        for raw, want in cases.items():
+            self.assertEqual(workbuddy._normalize_effort({"reasoning_effort": raw}),
+                             want, raw)
+
+    def test_object_forms(self):
+        import workbuddy
+        self.assertEqual(workbuddy._normalize_effort(
+            {"thinking": {"type": "enabled"}}), "medium")
+        self.assertEqual(workbuddy._normalize_effort(
+            {"thinking": {"type": "disabled"}}), "none")
+        self.assertEqual(workbuddy._normalize_effort(
+            {"thinking": {"effort": "low"}}), "low")
+        self.assertEqual(workbuddy._normalize_effort(
+            {"reasoning": {"effort": "high"}}), "high")
+
+    def test_body_carries_effort(self):
+        import json as _json
+        import workbuddy
+        body = _json.loads(workbuddy.build_chat_body(
+            [{"role": "user", "content": "x"}], "m",
+            parameters={"reasoning_effort": "high"}))
+        self.assertEqual(body["reasoning_effort"], "high")
+        # 不传就不该出现这个键：上游把「没有档位」当成不思考
+        body2 = _json.loads(workbuddy.build_chat_body(
+            [{"role": "user", "content": "x"}], "m"))
+        self.assertNotIn("reasoning_effort", body2)
+
+    def test_provider_passes_effort_through_untrimmed(self):
+        import providers
+        prov = providers.get("workbuddy")
+        # 目录里没有档位声明也要透传，Qoder 的规则会在这里裁成 None
+        self.assertEqual(prov.normalize_effort("high", {}), "high")
+        self.assertTrue(prov.wants_effort_objects)
+        self.assertFalse(providers.get("qoder").wants_effort_objects)
+
+
+class WorkbuddyBrandAnchorTest(unittest.TestCase):
+    """上游只拦 system 消息开头那段自称，改写后正文要一字不动。"""
+
+    def test_harness_leadin_replaced(self):
+        import workbuddy
+        text = ("You are an AI agent powered by DeepSeek Harness.\n\n"
+                "# Tone\nBe concise.")
+        out = workbuddy._scrub_brand_claims(text)
+        self.assertNotIn("DeepSeek Harness", out)
+        self.assertIn("Be concise.", out)
+        self.assertTrue(out.startswith("You are a coding assistant"))
+
+    def test_only_the_leadin_is_touched(self):
+        import workbuddy
+        text = "First line is fine.\n\nYou are an AI agent powered by DeepSeek Harness."
+        self.assertEqual(workbuddy._scrub_brand_claims(text), text)
+
+    def test_leading_newlines_do_not_defeat_the_scrub(self):
+        import workbuddy
+        out = workbuddy._scrub_brand_claims(
+            "\nYou are an AI agent powered by DeepSeek Harness.\nrest")
+        self.assertNotIn("DeepSeek Harness", out)
+        self.assertIn("rest", out)

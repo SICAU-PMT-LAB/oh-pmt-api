@@ -745,9 +745,15 @@ class Handler(BaseHTTPRequestHandler):
             account = ensure_fresh_token(account)
             parameters = {"max_tokens": body.get("max_tokens")
                           or body.get("max_completion_tokens") or 8192}
-            # 思考档位：客户端传什么由这里的 normalize_effort 对齐到该模型
-            # 官方支持的集合，不支持的档位上游会静默忽略、回落默认档
-            effort = qoder.normalize_effort(qoder.requested_effort(body), meta)
+            # 思考档位交给厂商自己对齐：Qoder 要裁到模型声明的集合，
+            # WorkBuddy 直通上游（不传就完全不思考，所以必须透传）。
+            # thinking / reasoning 这两个对象原样带上，只传 effort 会丢掉
+            # {"type": "enabled"} 这类「开思考但不指定档位」的写法。
+            if provider.wants_effort_objects:
+                for key in ("reasoning", "thinking"):
+                    if isinstance(body.get(key), dict):
+                        parameters[key] = body[key]
+            effort = provider.normalize_effort(qoder.requested_effort(body), meta)
             if effort:
                 parameters["reasoning_effort"] = effort
             payload = provider.build_chat_body(
