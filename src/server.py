@@ -289,6 +289,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _error(self, status: int, code: str, message: str, retry_after: int = 0):
+        # 流式响应开写之后，响应头和部分 SSE 已经发出去了。这时再写一个
+        # 完整 HTTP 响应会在流尾部粘上 "HTTP/1.1 500 ..." 的报文，
+        # 客户端把它当成 SSE 数据解析，整轮结果作废。只能作为一条
+        # SSE 错误事件收尾。
+        if getattr(self, "_stream_started", False):
+            err = {"error": {"code": code, "message": message, "type": code}}
+            try:
+                self.wfile.write(convert.to_sse(json.dumps(err, ensure_ascii=False)))
+                self.wfile.write(convert.DONE)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            self.close_connection = True
+            return
         extra = {"Retry-After": str(retry_after)} if retry_after else None
         self._send_json(status, {"error": {"code": code, "message": message,
                                            "type": code}},
@@ -766,12 +780,14 @@ class Handler(BaseHTTPRequestHandler):
             # 所以把等待收进网关。流式请求先开流再等，期间用注释帧保活并
             # 通知排队进度，客户端不至于因为长时间无数据而超时。
             if stream:
+                # 先置位再写响应头：写头这一步本身也可能半途失败，
+                # 那之后同样不能再补发一个完整的 HTTP 错误响应
+                self._stream_started = True
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "close")
                 self.end_headers()
-                self._stream_started = True
 
             deadline = time.time() + QUEUE_MAX_WAIT
             round_no = 0

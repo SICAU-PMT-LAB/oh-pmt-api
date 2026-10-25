@@ -595,3 +595,28 @@ class PickAccountConcurrencyTest(unittest.TestCase):
         first = s.pick_account("global")
         second = s.pick_account("global")
         self.assertNotEqual(first["id"], second["id"])
+
+
+class ChunkNormalizeTest(unittest.TestCase):
+    """上游 chunk 要符合 OpenAI 语义，否则按 finish_reason 判断结束的客户端会误判。"""
+
+    def test_empty_finish_reason_becomes_null(self):
+        import json
+        import convert
+        frame = ('data: {"choices":[{"index":0,"delta":{"content":"a"},'
+                 '"finish_reason":""}]}')
+        out = list(convert.iter_chunks(iter([frame]), {}))
+        self.assertEqual(json.loads(out[0])["choices"][0]["finish_reason"], None)
+
+    def test_real_finish_reason_untouched(self):
+        import convert
+        frame = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}'
+        out = list(convert.iter_chunks(iter([frame]), {}))
+        # 没有需要改的字段就原样透传，不做多余序列化
+        self.assertEqual(out[0], frame[6:])
+
+    def test_aggregate_survives_broken_choices(self):
+        import convert
+        # choices 是字符串时不能抛 string indices must be integers
+        agg = convert.aggregate(iter(['data: {"choices":"oops"}']), "m", {})
+        self.assertEqual(agg["choices"][0]["message"]["content"], None)

@@ -42,6 +42,37 @@ def _take_usage(usage: dict, holder: dict) -> None:
             break
 
 
+def _normalize_chunk(payload: str) -> str:
+    """把上游 chunk 里不合 OpenAI 语义的字段修掉。
+
+    目前只有一处：WorkBuddy 每帧都带 finish_reason，中间那些是空字符串。
+    OpenAI 的约定是中间帧给 null、最后一帧才给 'stop'/'tool_calls' 这类值，
+    而空字符串既不是 null 也不是合法值——按 finish_reason 判断流是否正常
+    结束的客户端（dsh 就是这样）会认为流没结束，于是丢掉整轮结果重试。
+
+    只在确实需要改的时候重新序列化，其余情况原样返回，省掉一遍 JSON 往返。
+    """
+    try:
+        chunk = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    if not isinstance(chunk, dict):
+        return payload
+    changed = False
+    choices = chunk.get("choices")
+    if not isinstance(choices, list):
+        return payload
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        if choice.get("finish_reason") == "":
+            choice["finish_reason"] = None
+            changed = True
+    if not changed:
+        return payload
+    return json.dumps(chunk, ensure_ascii=False)
+
+
 def _data_of(line: str) -> str:
     if not line.startswith("data:"):
         return ""
@@ -71,7 +102,7 @@ def iter_chunks(lines, usage_holder: dict | None = None):
                 usage = outer.get("usage")
                 if usage and usage_holder is not None:
                     _take_usage(usage, usage_holder)
-                yield payload
+                yield _normalize_chunk(payload)
             continue
 
         status = outer.get("statusCodeValue")
@@ -95,7 +126,7 @@ def iter_chunks(lines, usage_holder: dict | None = None):
             usage = inner.get("usage")
             if usage:
                 _take_usage(usage, usage_holder)
-        yield body
+        yield _normalize_chunk(body)
 
 
 def to_sse(chunk_json: str) -> bytes:
@@ -122,7 +153,12 @@ def aggregate(lines, model: str, usage_holder: dict | None = None) -> dict:
             continue
         if chunk.get("created"):
             created = int(chunk["created"])
-        for choice in chunk.get("choices") or []:
+        choices = chunk.get("choices")
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
             delta = choice.get("delta") or {}
             if delta.get("content"):
                 text_parts.append(delta["content"])
