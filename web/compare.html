@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<script>
+  /* 首屏前套用存过的主题，避免先渲染亮色再跳暗色 */
+  try {
+    var t = localStorage.getItem('pmt_site_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+    else document.documentElement.dataset.theme =
+      matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch (e) {}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型对比 | Prometheus API</title>
+<meta name="description" content="两个模型的正面对照：单价、上下文、用量走势与留存。">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/data.css">
+</head>
+<body>
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+<main data-page="stats">
+<header data-component="top">
+  <div data-slot="header-bar">
+    <a data-slot="brand" href="/" aria-label="Prometheus API 首页">
+      <span data-slot="stats-wordmark"><b>DATA</b></span>
+    </a>
+    <nav data-component="section-nav" aria-label="模型对比">
+      <ul>
+        <li><a href="/data#top-models">热门模型</a></li>
+        <li><a href="/data#leaderboard">排行榜</a></li>
+        <li><a href="/data#session-cost">会话成本</a></li>
+        <li><a href="/data#token-cost">Token 成本</a></li>
+        <li><a href="/data#cache-ratio">缓存比例</a></li>
+      </ul>
+    </nav>
+    <div data-slot="header-actions">
+      <button id="theme-toggle" data-slot="theme-toggle" data-variant="round"
+              type="button" aria-label="切换明暗" title="切换明暗"></button>
+      <button data-slot="menu-button" type="button" aria-controls="stats-mobile-nav"
+              aria-expanded="false" aria-label="打开导航">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.72H14M2 8.5H14M2 12.28H14" stroke="currentColor"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <nav id="stats-mobile-nav" data-slot="mobile-menu" aria-label="数据分区" hidden>
+    <a data-slot="mobile-menu-item" href="/data#top-models">热门模型</a>
+    <a data-slot="mobile-menu-item" href="/data#leaderboard">排行榜</a>
+    <a data-slot="mobile-menu-item" href="/data#session-cost">会话成本</a>
+    <a data-slot="mobile-menu-item" href="/data#token-cost">Token 成本</a>
+    <a data-slot="mobile-menu-item" href="/data#cache-ratio">缓存比例</a>
+  </nav>
+</header>
+
+<div data-component="container">
+<div data-component="content">
+
+<section id="overview" data-section="compare-detail-hero">
+  <nav data-component="compare-home-breadcrumb" aria-label="面包屑">
+    <a data-slot="compare-home-crumb" href="/data">数据</a>
+    <span data-slot="compare-home-separator">/</span>
+    <a data-slot="compare-home-crumb" href="/data#model-comparison">模型对比</a>
+  </nav>
+  <div data-slot="compare-detail-hero-grid">
+    <h1 id="compare-title" aria-label="模型对比"></h1>
+    <div data-slot="compare-detail-actions">
+      <a data-slot="compare-detail-action" href="/data#leaderboard">
+        <span data-slot="compare-home-plus">←</span>
+        <span>回数据页</span>
+      </a>
+    </div>
+  </div>
+  <div data-slot="compare-home-pattern" aria-hidden="true"></div>
+</section>
+
+<div data-component="compare-detail-comparison" data-model-count="2" id="compare-body"
+     style="--compare-detail-grid: minmax(0, var(--compare-detail-label-column)) repeat(2, minmax(var(--compare-detail-model-column-min), 1fr))">
+  <div data-component="compare-detail-heading-scroll">
+    <section data-section="compare-detail-selector" aria-label="所选模型">
+      <div data-component="compare-detail-selector-grid" id="compare-selector"></div>
+    </section>
+  </div>
+
+  <section data-section="compare-radar" aria-label="模型能力">
+    <ol data-slot="compare-radar-legend" id="compare-legend"></ol>
+    <div data-slot="compare-radar-chart" role="img" aria-label="能力雷达图" id="compare-radar">
+      <div data-slot="compare-radar-plot" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" id="compare-radar-svg"></svg>
+      </div>
+    </div>
+    <div data-slot="compare-radar-data" id="compare-radar-data"></div>
+  </section>
+
+  <div data-component="compare-detail-body-scroll">
+    <section data-section="compare-detail-matrix" aria-label="模型对照">
+      <div data-component="compare-detail-matrix" id="compare-matrix"></div>
+    </section>
+  </div>
+</div>
+
+<div data-slot="hero-meta-notice" hidden id="compare-error"></div>
+
+<footer data-component="footer">
+  <div data-slot="footer-pattern" aria-hidden="true"></div>
+  <div data-slot="footer-bottom">
+    <div>
+      <span>© <span id="year">2026</span> Prometheus Lab</span>
+      <span data-slot="status">所有系统运行正常</span>
+    </div>
+  </div>
+</footer>
+
+</div>
+</div>
+</main>
+<script type="module" src="/assets/compare.js"></script>
+</body>
+</html>

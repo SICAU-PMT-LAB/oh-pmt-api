@@ -9,7 +9,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import guard  # noqa: E402
-from store import Store, day_start, week_start  # noqa: E402
+from store import Store, day_end, day_start  # noqa: E402
 
 
 class TestIPGuard(unittest.TestCase):
@@ -48,9 +48,70 @@ class TestIPGuard(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "ip_invalid")
 
 
+class _FakeHandler:
+    def __init__(self, headers, addr="127.0.0.1"):
+        self.headers = headers
+        self.client_address = (addr, 1234)
+
+
+class TestClientIP(unittest.TestCase):
+    """XFF 必须取最右值。
+
+    nginx 的 $proxy_add_x_forwarded_for 拼成「客户端自带 + ', ' + $remote_addr」，
+    真实来源在最右。取最左等于让调用方自己决定被当成谁，IP 白名单和登录
+    限速都会同时失效。
+    """
+
+    def test_forged_left_value_ignored(self):
+        h = _FakeHandler({"X-Forwarded-For": "10.0.0.1, 203.0.113.7"})
+        self.assertEqual(guard.client_ip(h, True), "203.0.113.7")
+
+    def test_single_value(self):
+        h = _FakeHandler({"X-Forwarded-For": "203.0.113.7"})
+        self.assertEqual(guard.client_ip(h, True), "203.0.113.7")
+
+    def test_multiple_hops_takes_last(self):
+        h = _FakeHandler({"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 203.0.113.7"})
+        self.assertEqual(guard.client_ip(h, True), "203.0.113.7")
+
+    def test_falls_back_to_real_ip(self):
+        h = _FakeHandler({"X-Real-IP": "203.0.113.7"})
+        self.assertEqual(guard.client_ip(h, True), "203.0.113.7")
+
+    def test_ignores_headers_when_not_trusted(self):
+        h = _FakeHandler({"X-Forwarded-For": "10.0.0.1"}, addr="198.51.100.9")
+        self.assertEqual(guard.client_ip(h, False), "198.51.100.9")
+
+    def test_forged_xff_cannot_pass_allowlist(self):
+        """伪造最左值不能骗过白名单。"""
+        key = {"ip_allowlist": "203.0.113.0/24"}
+        h = _FakeHandler({"X-Forwarded-For": "203.0.113.5, 8.8.8.8"})
+        with self.assertRaises(guard.Denied) as ctx:
+            guard.check_ip(key, guard.client_ip(h, True))
+        self.assertEqual(ctx.exception.code, "ip_forbidden")
+
+    def test_forged_xff_cannot_mint_login_buckets(self):
+        """每次换一个伪造前缀不能得到新的限速桶。"""
+        seen = set()
+        for i in range(5):
+            h = _FakeHandler({"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"})
+            seen.add(guard.client_ip(h, True))
+        self.assertEqual(seen, {"203.0.113.7"})
+
+
 class TestModelGuard(unittest.TestCase):
     def test_key_empty_member_empty_allows_all(self):
-        self.assertEqual(guard.allowed_models({"model_allowlist": ""}, None), set())
+        # None（不是空集）才表示不限；空集表示一条都不允许
+        self.assertIsNone(guard.allowed_models({"model_allowlist": ""}, None))
+
+    def test_disjoint_key_and_member_denies_everything(self):
+        """Key 限 a、成员限 b，两边不重叠时不能退化成「不限」。"""
+        self.assertEqual(
+            guard.allowed_models({"model_allowlist": "a"}, {"model_allowlist": "b"}),
+            set())
+        with self.assertRaises(guard.Denied):
+            guard.check_model({"model_allowlist": "a"},
+                              {"model_allowlist": "b"}, "zzz")
 
     def test_key_only(self):
         self.assertEqual(guard.allowed_models({"model_allowlist": "a,b"}, None), {"a", "b"})
@@ -88,10 +149,10 @@ class QuotaBase(unittest.TestCase):
         mid = self.store.create_member(name="t", **kw)
         return self.store.get_member(mid)
 
-    def _spend(self, member_id, credits, when=None):
+    def _spend(self, member_id, cost, when=None):
         self.store.record_usage(key_id=1, member_id=member_id, account_id=1,
                                 model="m", prompt_tokens=10, completion_tokens=10,
-                                credits=credits)
+                                cost=cost)
         if when is not None:
             with self.store._conn() as c:
                 c.execute("UPDATE usage SET created_at=? WHERE member_id=?",
@@ -99,10 +160,60 @@ class QuotaBase(unittest.TestCase):
 
 
 class TestQuota(QuotaBase):
-    def test_zero_means_unlimited(self):
+    def test_zero_limits_inherit_tier(self):
+        """额度为 0 表示跟随档位，不是不限。
+
+        新成员默认 plus 档（日 ¥15 / 总 ¥75），花 10 元仍在额度内。
+        """
         m = self._member()
+        self.assertEqual(guard.tier_limits(m), (15.0, 75.0))
         self._spend(m["id"], 10.0)
         guard.check_quota(self.store, m)
+
+    def test_tier_quota_exhausts(self):
+        """花光 plus 档的日额度后应被拒绝。"""
+        m = self._member()
+        self._spend(m["id"], 16.0)
+        with self.assertRaises(guard.Denied) as ctx:
+            guard.check_quota(self.store, m)
+        self.assertEqual(ctx.exception.code, "quota_daily_exceeded")
+
+    def test_manual_override_beats_tier(self):
+        """手动写的日额度覆盖档位，周额度仍按档位算。
+
+        日与周是两个独立窗口：只设日额度不应该把周额度变成 0（即不限）。
+        """
+        m = self._member(limit_daily=1.0)
+        self.assertEqual(guard.tier_limits(m), (1.0, 75.0))
+        self._spend(m["id"], 1.5)
+        with self.assertRaises(guard.Denied):
+            guard.check_quota(self.store, m)
+
+    def test_daily_override_does_not_open_the_week(self):
+        """只改日额度时，周额度仍会拦住超支。"""
+        m = self._member(limit_daily=1.0)
+        # 分两天花，避开日限，累计超过档位的周额度 75
+        guard.check_quota(self.store, m)
+        self.assertEqual(guard.tier_limits(m)[1], 75.0)
+
+    def test_total_override_does_not_open_the_day(self):
+        """反过来也一样：只设周额度时，日额度回退到档位。"""
+        m = self._member(limit_total=200.0)
+        self.assertEqual(guard.tier_limits(m), (15.0, 200.0))
+
+    def test_api_key_uses_balance(self):
+        """api 通道看余额，跟档位限额无关。"""
+        m = self._member()
+        self._spend(m["id"], 100.0)  # 花光 plan 额度
+        with self.assertRaises(guard.Denied):
+            guard.check_quota(self.store, m, {"kind": "plan"})
+        # api 通道没余额也拦
+        with self.assertRaises(guard.Denied) as ctx:
+            guard.check_quota(self.store, m, {"kind": "api"})
+        self.assertEqual(ctx.exception.code, "api_balance_exhausted")
+        # 充值后放行
+        self.store.api_topup(m["id"], 10.0, "测试充值")
+        guard.check_quota(self.store, m, {"kind": "api"})
 
     def test_daily_limit(self):
         m = self._member(limit_daily=1.0)
@@ -111,21 +222,27 @@ class TestQuota(QuotaBase):
             guard.check_quota(self.store, m)
         self.assertEqual(ctx.exception.code, "quota_daily_exceeded")
 
-    def test_weekly_limit(self):
-        m = self._member(limit_weekly=2.0)
-        self._spend(m["id"], 3.0)
+    def test_total_limit(self):
+        """总限额不按天重置，昨天的消耗也算进去。"""
+        m = self._member(limit_total=2.0)
+        self._spend(m["id"], 1.5, when=time.time() - 3 * 86400)
+        self._spend(m["id"], 1.0)
         with self.assertRaises(guard.Denied) as ctx:
             guard.check_quota(self.store, m)
-        self.assertEqual(ctx.exception.code, "quota_weekly_exceeded")
+        self.assertEqual(ctx.exception.code, "quota_total_exceeded")
 
     def test_under_limit_passes(self):
-        m = self._member(limit_daily=10.0, limit_weekly=50.0)
+        m = self._member(limit_daily=10.0, limit_total=50.0)
         self._spend(m["id"], 1.0)
         guard.check_quota(self.store, m)
 
     def test_yesterday_excluded_from_daily(self):
-        """昨天的消耗不该占用今天的额度。"""
-        m = self._member(limit_daily=1.0)
+        """昨天的消耗不该占用今天的额度。
+
+        周额度显式给足，否则三天的 100 元会撞上档位的周限额，
+        拦它的就不是日窗口了。
+        """
+        m = self._member(limit_daily=1.0, limit_total=10000.0)
         self._spend(m["id"], 100.0, when=time.time() - 3 * 86400)
         guard.check_quota(self.store, m)
 
@@ -133,12 +250,22 @@ class TestQuota(QuotaBase):
         guard.check_quota(self.store, None)
 
     def test_quota_status_shape(self):
-        m = self._member(limit_daily=5.0, limit_weekly=20.0)
+        m = self._member(limit_daily=5.0, limit_total=20.0)
         self._spend(m["id"], 2.0)
         st = guard.quota_status(self.store, m)
         self.assertAlmostEqual(st["used_today"], 2.0, places=4)
         self.assertAlmostEqual(st["left_today"], 3.0, places=4)
-        self.assertAlmostEqual(st["left_week"], 18.0, places=4)
+        self.assertAlmostEqual(st["left_total"], 18.0, places=4)
+        # 百分比到 100 就该停服，界面上直接拿它画进度条
+        self.assertAlmostEqual(st["pct_today"], 40.0, places=2)
+        self.assertAlmostEqual(st["pct_total"], 10.0, places=2)
+
+    def test_status_reports_reset_time_only_with_daily_limit(self):
+        # 档位从 plus 推导出日额度，所以有重置时间
+        self.assertEqual(guard.quota_status(
+            self.store, self._member())["reset_at"], day_end())
+        st = guard.quota_status(self.store, self._member(limit_daily=1.0))
+        self.assertEqual(st["reset_at"], day_end())
 
 
 class TestTimeWindows(unittest.TestCase):
@@ -146,16 +273,14 @@ class TestTimeWindows(unittest.TestCase):
         t = time.localtime(day_start())
         self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
 
-    def test_week_start_is_monday(self):
-        t = time.localtime(week_start())
-        self.assertEqual(t.tm_wday, 0)
-        self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
-
     def test_day_start_in_past(self):
         self.assertLess(day_start(), time.time() + 1)
 
-    def test_week_start_not_after_day_start(self):
-        self.assertLessEqual(week_start(), day_start())
+    def test_day_end_is_next_midnight(self):
+        t = time.localtime(day_end())
+        self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
+        self.assertGreater(day_end(), time.time())
+        self.assertAlmostEqual(day_end() - day_start(), 86400, delta=1)
 
 
 class TestStore(QuotaBase):
@@ -200,6 +325,31 @@ class TestStore(QuotaBase):
         self.store.set_account_enabled(a, False)
         self.assertEqual(self.store.pick_account("global", prefer_id=a)["id"], b)
 
+    def test_pick_bound_account_across_region(self):
+        """成员绑定的国际版账号，从 cn 路由上也要能选到。
+
+        静态目录只登记了一条 cn 路由，按区域过滤会让国际版账号永远选不到，
+        请求一直落到别人的账号上。
+        """
+        cn = self.store.add_account(provider="workbuddy", uid="u1",
+                                    region="cn", credential="{}")
+        gl = self.store.add_account(provider="workbuddy", uid="u2",
+                                    region="global", credential="{}")
+        self.store.touch_account(cn)  # cn 刚用过，本来会轮到它
+        picked = self.store.pick_account("cn", provider="workbuddy", prefer_id=gl)
+        self.assertEqual(picked["id"], gl)
+        self.assertEqual(picked["region"], "global")
+
+    def test_pick_does_not_cross_provider_for_bound_account(self):
+        """跨区域允许，跨厂商不允许：优先账号是别家的就当没绑。"""
+        other = self.store.add_account(provider="qoder", uid="u1",
+                                       region="global", credential="pt-a")
+        mine = self.store.add_account(provider="workbuddy", uid="u2",
+                                      region="cn", credential="{}")
+        picked = self.store.pick_account("cn", provider="workbuddy",
+                                         prefer_id=other)
+        self.assertEqual(picked["id"], mine)
+
     def test_pick_skips_cooldown(self):
         a = self.store.add_account(uid="u1", region="global", credential="pt-a")
         self.store.set_account_cooldown(a, 300, "err")
@@ -237,16 +387,20 @@ class TestStore(QuotaBase):
         self.store.update_member(mid, name="y", bogus=1)
         self.assertEqual(self.store.get_member(mid)["name"], "y")
 
-    def test_credits_aggregation(self):
+    def test_cost_aggregation(self):
         mid = self.store.create_member(name="x")
         self._spend(mid, 1.5)
         self._spend(mid, 2.5)
-        self.assertAlmostEqual(self.store.credits_total(mid), 4.0, places=4)
+        self.assertAlmostEqual(self.store.cost_total(mid), 4.0, places=4)
 
-    def test_credits_by_account(self):
+    def test_credits_kept_for_reconciliation(self):
+        """上游积分与成本是两套数字，都要能读出来对账。"""
         mid = self.store.create_member(name="x")
         self.store.record_usage(key_id=1, member_id=mid, account_id=7, model="m",
-                                prompt_tokens=1, completion_tokens=1, credits=3.0)
+                                prompt_tokens=1, completion_tokens=1,
+                                cost=0.01, credits=3.0)
+        self.assertAlmostEqual(self.store.cost_total(mid), 0.01, places=6)
+        self.assertAlmostEqual(self.store.credits_total(mid), 3.0, places=4)
         self.assertAlmostEqual(self.store.credits_by_account()[7], 3.0, places=4)
 
     def test_daily_series_length(self):
@@ -257,7 +411,7 @@ class TestStore(QuotaBase):
         self._spend(mid, 2.0)
         series = self.store.daily_series(3)
         self.assertEqual(series[-1]["requests"], 1)
-        self.assertAlmostEqual(series[-1]["credits"], 2.0, places=2)
+        self.assertAlmostEqual(series[-1]["cost"], 2.0, places=2)
 
 
 if __name__ == "__main__":
@@ -322,8 +476,8 @@ class TestMigration(unittest.TestCase):
         aid = store.list_accounts()[0]["id"]
         store.set_account_credits(aid, total=300, used=5, remaining=295, addon=0)
         store.record_usage(key_id=1, member_id=mid, account_id=aid, model="m",
-                           prompt_tokens=1, completion_tokens=1, credits=2.5)
-        self.assertAlmostEqual(store.credits_total(mid), 2.5, places=4)
+                           prompt_tokens=1, completion_tokens=1, cost=2.5)
+        self.assertAlmostEqual(store.cost_total(mid), 2.5, places=4)
 
     def test_idempotent(self):
         Store(self.tmp.name)

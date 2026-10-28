@@ -29,7 +29,9 @@ class UpstreamStatusError(Exception):
 def _take_usage(usage: dict, holder: dict) -> None:
     """记下最后一帧的 usage。
 
-    Qoder 的字段叫 credits，WorkBuddy 叫 credit，两者都可能带原始价。
+    两家的字段不一样：Qoder 叫 credits，WorkBuddy 叫 credit；两者都可能带
+    原始价。缓存命中/写入的 token 按 OpenAI 的写法埋在
+    prompt_tokens_details 里，直接给出的也有（cached_tokens）。
     """
     holder["usage"] = usage
     for key in ("credits", "credit"):
@@ -40,6 +42,24 @@ def _take_usage(usage: dict, holder: dict) -> None:
         if usage.get(key) is not None:
             holder["credits_original"] = float(usage[key])
             break
+
+    def num(*keys) -> int:
+        for k in keys:
+            v = usage.get(k)
+            if isinstance(v, (int, float)):
+                return int(v)
+        return 0
+
+    details = usage.get("prompt_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    cache_read = num("cache_read_input_tokens", "cache_read_tokens",
+                     "cached_tokens") or int(details.get("cached_tokens") or 0)
+    cache_write = num("cache_creation_input_tokens", "cache_write_tokens",
+                      "cache_creation_tokens")
+    if cache_read:
+        holder["cache_read_tokens"] = cache_read
+    if cache_write:
+        holder["cache_write_tokens"] = cache_write
 
 
 def _normalize_chunk(payload: str) -> str:
@@ -187,6 +207,8 @@ def aggregate(lines, model: str, usage_holder: dict | None = None) -> dict:
         message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
 
     usage = (usage_holder or {}).get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    completion_tokens = int(usage.get("completion_tokens") or 0)
     return {
         "id": "chatcmpl-" + uuid.uuid4().hex[:24],
         "object": "chat.completion",
@@ -194,9 +216,11 @@ def aggregate(lines, model: str, usage_holder: dict | None = None) -> dict:
         "model": model,
         "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
         "usage": {
-            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
             "total_tokens": int(usage.get("total_tokens") or 0),
+            "cache_read_tokens": int((usage_holder or {}).get("cache_read_tokens") or 0),
+            "cost": round(float((usage_holder or {}).get("cost") or 0), 8),
             "credits": float((usage_holder or {}).get("credits") or 0),
         },
     }

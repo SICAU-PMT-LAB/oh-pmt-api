@@ -44,6 +44,14 @@ class Provider:
     # 直通型上游（WorkBuddy）需要，因为 {"type": "enabled"} 这类写法
     # 本身就是一个档位信息；Qoder 的参数表是封闭的，多塞键会被拒。
     wants_effort_objects = False
+    # 列模型目录是否需要一个能连上的账号。Qoder 要拿 job token 再请求接口，
+    # 所以没账号就读不到；WorkBuddy 的 CATALOG 是本地静态表，与账号无关。
+    # 这一项让成员能勾选模型时不依赖账号是否在冷却或刚接入未同步。
+    catalog_needs_account = True
+    # 上游的计费单位：credit = 积分（Qoder / WorkBuddy 按积分扣额度），
+    # token = 按 token 计费。成员页按账号统计消耗时以它决定记哪一种，
+    # 积分账号的 token 数只是过程量，不能和 token 账号的 token 相加。
+    billing_unit = "token"
 
     # ---- 协议能力 ----
 
@@ -101,6 +109,7 @@ class Provider:
             "credential_hint": self.credential_hint,
             "credential_url": self.credential_url,
             "supports_checkin": self.supports_checkin,
+            "billing_unit": self.billing_unit,
             "regions": [{"id": rid, "label": self.region_label(rid)}
                         for rid in self.regions],
         }
@@ -116,6 +125,7 @@ class QoderProvider(Provider):
     credential_url = "https://qoder.com/account/integrations"
     available = True
     supports_checkin = True
+    billing_unit = "credit"
     regions = {rid: {"label": info["label"]} for rid, info in qoder.REGIONS.items()}
 
     def connect(self, credential: str, region: str) -> dict:
@@ -173,7 +183,10 @@ class WorkbuddyProvider(Provider):
     credential_url = ""
     available = True
     supports_checkin = True
+    billing_unit = "credit"
     wants_effort_objects = True
+    # CATALOG 是本地静态表，没有账号也能列，不依赖账号是否可用
+    catalog_needs_account = False
     regions = {rid: {"label": info["label"]}
                for rid, info in workbuddy.REGIONS.items()}
 
@@ -290,3 +303,13 @@ def describe_all() -> list[dict]:
 
 def is_available(slug: str | None) -> bool:
     return get(slug).available
+
+
+def billing_unit(slug: str | None) -> str:
+    """账号所属厂商的计费口径。
+
+    不直接用 get()：它对未知 slug 回退到默认厂商，会把已删除账号或空
+    provider 误判成积分。这里未知一律按 token 算，宁可少标一个积分。
+    """
+    prov = PROVIDERS.get((slug or "").strip())
+    return prov.billing_unit if prov else "token"

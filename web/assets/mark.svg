@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34" fill="none">
+  <!-- Prometheus 标记：同心圆 + 十字准星，栅格化后与 opencode 的字标风格一致 -->
+  <rect x="0.75" y="0.75" width="32.5" height="32.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <circle cx="17" cy="17" r="9.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <circle cx="17" cy="17" r="4" fill="currentColor"/>
+  <path d="M17 1v6M17 27v6M1 17h6M27 17h6" stroke="currentColor" stroke-width="1.5"/>
+</svg>

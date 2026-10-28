@@ -3,154 +3,500 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>我的用量 · oh-pmt-api</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/ui.css">
-<style>
-  .quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-  .quota-card { border: 1px solid var(--rule); border-radius: 10px; padding: 20px 22px;
-                background: var(--card); position: relative; overflow: hidden; }
-  .quota-card::before {
-    content: ""; position: absolute; inset: 0; border-radius: 9px; padding: 1px;
-    background: linear-gradient(140deg, var(--gold), transparent 45%, transparent 60%, var(--gold));
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor; mask-composite: exclude; opacity: .5;
+<!-- 主题必须在首次绘制前落地：跨页跳转（如点账号详情）时样式表还没下载完，
+     先按记住的主题刷底色，否则深色模式下会闪一下白屏 -->
+<script>
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('pmt_site_theme'); } catch (e) {}
+  if (t !== 'dark' && t !== 'light') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark' : 'light';
   }
-  .quota-card .label { font-family: var(--mono); font-size: 9px; letter-spacing: .14em;
-                       text-transform: uppercase; color: var(--ink-faint); }
-  .quota-card .big { font-family: var(--serif); font-size: 34px; font-weight: 500;
-                     line-height: 1.1; margin: 8px 0 3px; font-variant-numeric: tabular-nums; }
-  .quota-card .big small { font-size: 14px; color: var(--ink-faint); margin-left: 4px; }
-  .quota-card .of { font-size: 12.5px; color: var(--ink-soft); }
-  .whoami .name { font-family: var(--serif); font-size: 16px; }
-  .whoami { padding: 0 22px 18px; }
-  .whoami .sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
-  @media (max-width: 860px) { .quota-grid { grid-template-columns: 1fr; } }
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#0c0c0e' : '#ffffff';
+})();
+</script>
+<title>我的用量 · oh-pmt-api</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/panel.css">
+<style>
+  /* 成员控制台专用的几块小样式。基础组件全在 panel.css 里，
+     这里只管三条通道相关的排版：额度条、通道块、模型表。 */
+
+  /* 额度条：一条细进度条 + 右侧百分比，脚注写重置时间 */
+  .ql { display: grid; gap: 6px; }
+  .ql + .ql { margin-top: 18px; }
+  .ql-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; font-size: 12px; color: var(--p-text-2);
+  }
+  .ql-head b {
+    font-size: 13px; font-weight: 600; color: var(--p-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .ql-head b.warn { color: var(--p-warn); }
+  .ql-head b.err { color: var(--p-danger); }
+  .ql-foot { font-size: 11px; color: var(--p-text-3); }
+
+  /* 通道块：PLAN 与 API 各占一块，之间用虚线分开，避免看起来像一个池子 */
+  .chan + .chan {
+    margin-top: 26px; padding-top: 24px; border-top: 1px dashed var(--p-line);
+  }
+  .chan-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .chan-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .chan-head .spacer { flex: 1; }
+  .chan-note {
+    margin: 0 0 14px; font-size: 11.5px; line-height: 1.7;
+    color: var(--p-text-3); max-width: 62ch;
+  }
+
+  /* 通道切换：全部 / PLAN / API。样式与 panel.css 的 .seg 一致，
+     这里重写是因为成员页没有引入 admin 的内联样式表。 */
+  .seg {
+    display: inline-flex; gap: 2px; padding: 2px; border-radius: 4px;
+    border: 1px solid var(--p-line-strong);
+  }
+  .seg button {
+    border: 0; padding: 4px 12px; border-radius: 3px;
+    background: transparent; color: var(--p-text-2);
+    font: inherit; font-size: 11.5px; cursor: pointer;
+  }
+  .seg button.on { background: var(--p-surface); color: var(--p-text); font-weight: 600; }
+
+  /* 分页条 */
+  .pager {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 14px; font-size: 11.5px; color: var(--p-text-3);
+  }
+  .pager .spacer { flex: 1; }
+  .pager select {
+    padding: 3px 6px; border: 1px solid var(--p-line-strong); border-radius: 3px;
+    background: transparent; color: var(--p-text); font: inherit; font-size: 11.5px;
+  }
+
+  /* 密钥行里的用量摘要 */
+  .keyrow .use {
+    margin-top: 3px; font-size: 11px; color: var(--p-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 模型表的额度列：两行数字 + 细进度条 */
+  .model-limit .cap { font-size: 11px; color: var(--p-text-3); }
+  .model-limit .meter { margin-top: 5px; width: 96px; }
+
+  td.wrap, th.wrap { white-space: normal; }
+
+  /* 账号卡片（改密码）放在概览底部 */
+  .acct { display: grid; gap: 12px; max-width: 420px; }
+  .acct .row { display: grid; gap: 6px; }
+  .acct label { font-size: 11.5px; color: var(--p-text-2); }
+  .acct input {
+    padding: 7px 10px; border: 1px solid var(--p-line-strong); border-radius: 4px;
+    background: transparent; color: var(--p-text); font: inherit; font-size: 12.5px;
+  }
 </style>
 </head>
-<body>
-<div class="layout">
+<body data-page="site">
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
 
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-          <circle cx="12" cy="12" r="8.4" opacity=".45"/>
-          <circle cx="12" cy="12" r="4.6"/>
-          <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
-        </svg>
-        <h1>oh-pmt-api</h1>
-      </div>
-      <div class="kicker">成员控制台</div>
+<div data-component="container">
+
+  <section data-component="top">
+    <a class="brand" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+      <span class="kicker">成员控制台</span>
+    </a>
+    <div class="who-inline">
+      <span class="name" id="who-name">—</span>
+      <span class="sub" id="who-sub"></span>
     </div>
-    <div class="whoami">
-      <div class="name" id="who-name">—</div>
-      <div class="sub" id="who-sub"></div>
-    </div>
+
     <nav id="nav">
-      <a href="#usage" data-page="usage" class="active"><span class="ico">◈</span>用量</a>
-      <a href="#models" data-page="models"><span class="ico">◇</span>模型</a>
-      <a href="#guide" data-page="guide"><span class="ico">⌘</span>接入</a>
-      <a href="#" id="logout"><span class="ico">⏻</span>退出登录</a>
+      <a href="#overview" data-page="overview" class="active">概览</a>
+      <a href="#usage" data-page="usage">用量</a>
+      <a href="#api" data-page="api">API</a>
+      <a href="#models" data-page="models">模型</a>
     </nav>
-    <div class="sidebar-foot">
-      <div class="theme-toggle" title="切换明暗">
-        <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
-        <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
-      </div>
+
+    <div class="top-actions">
+      <button type="button" class="theme-icon" id="theme-toggle"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a href="#" class="logout-btn" id="logout" aria-label="退出登录" title="退出登录"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="transform:scaleX(-1)"><path d="M6.75 4.5V3a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-.75.75h-6A.75.75 0 0 1 6.75 15v-1.5M9.75 9H2.25M9.75 9 7 6.25M9.75 9 7 11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg><span class="t">退出</span></a>
+      <button type="button" class="nav-toggle" aria-expanded="false"
+              aria-controls="nav-mobile-menu" aria-label="打开菜单">
+        <span class="sr-only">打开菜单</span>
+        <svg class="icon icon-hamburger" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="square"/>
+        </svg>
+        <svg class="icon icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                fill="currentColor"/>
+        </svg>
+      </button>
     </div>
-  </aside>
+  </section>
 
-  <main class="main">
+  <div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+    <a href="#overview" data-page="overview" class="active">概览</a>
+    <a href="#usage" data-page="usage">用量</a>
+    <a href="#api" data-page="api">API</a>
+    <a href="#models" data-page="models">模型</a>
+  </div>
 
-    <section class="page active" id="page-usage">
+  <main class="main" id="main">
+
+    <!-- ───────────────── 概览 ───────────────── -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Overview</div>
+          <h2>概览</h2>
+          <p>你的额度、花费与最近的调用。日额度每天 0 点重置，周额度累计不重置。</p>
+        </div>
+        <div class="actions">
+          <button class="btn small" id="btn-refresh">刷新</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid" id="ov-kpi"></div>
+
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="card-head"><h3>PLAN 通道额度</h3>
+            <span class="sub" id="ov-tier">—</span></div>
+          <div id="ov-quota"><div class="empty">正在读取…</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>API 通道余额</h3>
+            <span class="sub" id="ov-api-sub"></span></div>
+          <div id="ov-api"><div class="empty">正在读取…</div></div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="t">近 14 天消耗</span>
+          <span class="spacer"></span>
+          <div class="seg" id="ov-measure">
+            <button data-measure="cost" class="on">成本</button>
+            <button data-measure="tokens">Token</button>
+          </div>
+        </div>
+        <div id="ov-chart"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">最近调用</span>
+          <span class="spacer"></span>
+          <a class="btn small ghost" href="#usage">查看全部</a></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>模型</th><th>通道</th>
+              <th class="num">Token</th><th class="num">成本</th><th>结果</th></tr></thead>
+            <tbody id="ov-recent"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>账号</h3></div>
+        <div class="acct">
+          <div class="row">
+            <label>登录账号</label>
+            <div class="mono" id="acct-user" style="font-size:12.5px">—</div>
+          </div>
+          <div class="row">
+            <label for="pw-old">原密码</label>
+            <input id="pw-old" type="password" autocomplete="current-password">
+          </div>
+          <div class="row">
+            <label for="pw-new">新密码</label>
+            <input id="pw-new" type="password" autocomplete="new-password">
+          </div>
+          <div class="row">
+            <label for="pw-new2">再输一次</label>
+            <input id="pw-new2" type="password" autocomplete="new-password">
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn small primary" id="btn-pw">修改密码</button>
+            <span class="hint" id="pw-msg"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────── 用量 ───────────────── -->
+    <section class="page" id="page-usage">
       <div class="page-head">
         <div>
           <div class="eyebrow">Usage</div>
           <h2>用量</h2>
-          <p>你的积分消耗。每日和每周各有独立上限，额度由管理员分配。</p>
+          <p>按通道分开统计。PLAN 通道按档位额度扣，API 通道按赠礼余额扣，两边不能相加。</p>
         </div>
-      </div>
-      <div class="quota-grid" id="quota-grid"></div>
-      <div class="chart-card">
-        <div class="chart-head"><span class="t">近 14 天 · 积分消耗</span>
-          <span class="spacer"></span>
-          <div class="chart-legend">
-            <span class="li"><span class="sw" style="background:var(--gold)"></span>积分</span>
+        <div class="actions">
+          <div class="seg" id="us-channel">
+            <button data-chan="" class="on">全部</button>
+            <button data-chan="plan">PLAN</button>
+            <button data-chan="api">API</button>
+          </div>
+          <div class="seg" id="us-days">
+            <button data-days="1">今天</button>
+            <button data-days="7" class="on">7 天</button>
+            <button data-days="30">30 天</button>
+            <button data-days="0">全部</button>
           </div>
         </div>
-        <div id="my-chart"></div>
       </div>
+
+      <div class="kpi-grid" id="us-kpi"></div>
+
       <div class="chart-card">
-        <div class="chart-head"><span class="t">按模型用量</span></div>
-        <div class="table-wrap"><table id="my-models"></table></div>
+        <div class="chart-head"><span class="t" id="us-chart-title">每日成本</span>
+          <span class="spacer"></span>
+          <div class="chart-legend">
+            <span class="li"><span class="sw" style="background:var(--p-accent)"></span>成本</span>
+          </div>
+        </div>
+        <div id="us-chart"></div>
       </div>
+
       <div class="chart-card">
-        <div class="chart-head"><span class="t">最近调用</span></div>
+        <div class="chart-head"><span class="t">按模型</span>
+          <span class="spacer"></span>
+          <span class="sub" id="us-model-note"></span></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>时间</th><th>模型</th><th class="num">积分</th>
-              <th class="num">Token</th><th>结果</th></tr></thead>
-            <tbody id="my-recent"></tbody>
+            <thead><tr><th>模型</th><th class="num">请求</th>
+              <th class="num">输入</th><th class="num">输出</th>
+              <th class="num">命中率</th><th class="num">成本</th>
+              <th class="num">成功率</th></tr></thead>
+            <tbody id="us-models"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head"><span class="t">调用明细</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>模型</th><th>通道</th>
+              <th class="num">输入</th><th class="num">输出</th>
+              <th class="num">成本</th><th>结果</th></tr></thead>
+            <tbody id="us-calls"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="us-pager"></div>
+      </div>
+    </section>
+
+    <!-- ───────────────── API ───────────────── -->
+    <section class="page" id="page-api">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">API</div>
+          <h2>接入</h2>
+          <p>两个通道各有一套密钥与计费方式，按用途分开建，别混用。</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="chan-head">
+          <h3>接口地址</h3>
+          <span class="spacer"></span>
+          <span class="hint">OpenAI 兼容</span>
+        </div>
+        <div class="keybox" id="api-url">—</div>
+        <h3 class="section">调用示例</h3>
+        <div class="keybox" id="curl-example" style="white-space:pre-wrap">—</div>
+        <div class="note" style="margin-top:10px">
+          密钥等同于账户凭证，不要分享。丢了只能删掉重建，服务端只存哈希。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="chan chan-plan">
+          <div class="chan-head">
+            <h3>PLAN 通道</h3>
+            <span class="pill">按档位额度</span>
+            <span class="spacer"></span>
+            <button class="btn small" data-new-key="plan">新建密钥</button>
+          </div>
+          <p class="chan-note">
+            按档位额度扣减：每次调用按模型单价算出成本，累加到日额度与周额度上。
+            额度用完会返回 <span class="mono">429</span>，日额度次日 0 点恢复。
+          </p>
+          <div id="keys-plan"><div class="empty">正在读取…</div></div>
+        </div>
+
+        <div class="chan chan-api">
+          <div class="chan-head">
+            <h3>API 通道</h3>
+            <span class="pill">按赠礼余额</span>
+            <span class="spacer"></span>
+            <button class="btn small" data-new-key="api" id="btn-new-api-key">新建密钥</button>
+          </div>
+          <p class="chan-note">
+            按赠礼余额扣减：每次调用从余额里扣，余额归零后返回
+            <span class="mono">429</span>。余额由管理员发放，与档位额度互不影响。
+          </p>
+          <p class="chan-note" id="api-balance-note" hidden></p>
+          <div class="grid cols-2">
+            <div>
+              <h3 class="section">密钥</h3>
+              <div id="keys-api"><div class="empty">正在读取…</div></div>
+            </div>
+            <div>
+              <h3 class="section">流水</h3>
+              <div id="api-ledger"><div class="empty">正在读取…</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────── 模型 ───────────────── -->
+    <section class="page" id="page-models">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Models</div>
+          <h2>模型</h2>
+          <p>单价单位是元 / 百万 token。限额是按模型算的额度，默认等于你的档位额度。</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>可用模型</h3>
+          <span class="sub" id="md-note"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>模型名</th>
+              <th class="num">输入</th>
+              <th class="num">输出</th>
+              <th class="num">命中</th>
+              <th class="num wrap">限额（日 / 周）</th>
+            </tr></thead>
+            <tbody id="md-rows"></tbody>
           </table>
         </div>
       </div>
     </section>
 
-    <section class="page" id="page-models">
-      <div class="page-head">
-        <div>
-          <div class="eyebrow">Models</div>
-          <h2>可用模型</h2>
-          <p>管理员为你开放的模型。请求其他模型会被拒绝。</p>
-        </div>
-      </div>
-      <div class="card"><div id="model-list"></div></div>
-      <div class="card">
-        <h3 class="section">密钥与限制</h3>
-        <div id="key-info"></div>
-      </div>
-    </section>
-
-    <section class="page" id="page-guide">
-      <div class="page-head">
-        <div>
-          <div class="eyebrow">Integration</div>
-          <h2>接入方式</h2>
-          <p>把地址和密钥填进任意 OpenAI 兼容客户端即可。</p>
-        </div>
-      </div>
-      <div class="card gold-edge">
-        <h3 class="section">接口地址</h3>
-        <div class="keybox" id="api-url">—</div>
-        <h3 class="section" style="margin-top:20px">调用示例</h3>
-        <div class="keybox" id="curl-example" style="white-space:pre-wrap">—</div>
-        <div class="note">密钥等同于账户凭证，不要分享。怀疑泄漏请联系管理员重新生成。</div>
-      </div>
-    </section>
-
   </main>
+
+  <footer class="panel-foot">
+    <span>© <span id="year">2026</span> Prometheus Lab · 成员控制台</span>
+    <span>
+      <a href="/">站点首页</a> ·
+      <a href="/data">公开数据</a> ·
+      <a href="/docs">Docs</a>
+    </span>
+  </footer>
+</div>
+
+<!-- 新建密钥：填名字并选通道 -->
+<div class="modal-mask" id="mk-key">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-scroll">
+      <h3>新建密钥</h3>
+      <div class="field" style="margin-bottom:14px">
+        <label for="mk-name">名称</label>
+        <input id="mk-name" placeholder="例如：Cursor / 脚本" maxlength="40">
+      </div>
+      <div class="field">
+        <label>通道</label>
+        <div class="seg" id="mk-kind">
+          <button type="button" data-kind="plan" class="on">PLAN</button>
+          <button type="button" data-kind="api">API</button>
+        </div>
+        <div class="hint" id="mk-kind-hint" style="margin-top:8px"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-close="mk-key">取消</button>
+      <button class="btn primary" id="mk-submit">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 密钥只显示这一次 -->
+<div class="modal-mask" id="show-key">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-scroll">
+      <h3>密钥已创建</h3>
+      <div class="notice">
+        <span class="ico">i</span>
+        <span>密钥只显示这一次。服务端只存哈希，关掉之后再也取不回来，
+              丢了只能删掉重建。</span>
+      </div>
+      <div class="keybox" style="display:flex;gap:10px;align-items:center;margin-top:14px">
+        <span id="show-key-val" style="word-break:break-all;flex:1"></span>
+        <button class="btn small" id="show-key-copy" style="flex:none">复制</button>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:16px;font-size:12px">
+        <input type="checkbox" id="show-key-ok"> 我已保存好这个密钥
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn primary" id="show-key-close" disabled>关闭</button>
+    </div>
+  </div>
 </div>
 
 <script type="module">
 import {
-  initTheme, esc, fmtInt, fmtCompact, lineChart, hbarList, countUp,
+  esc, fmtInt, fmtCompact, fmtMoney, lineChart, countUp, toast,
 } from '/assets/charts.js';
+import { mountBackdrop } from '/assets/backdrop.js';
+import { initWordmarkScroll } from '/assets/wordmark.js';
+import { initMobileNav } from '/assets/nav-mobile.js';
+import '/assets/theme-toggle.js';
 
-initTheme();
+mountBackdrop();
+initWordmarkScroll(document.querySelector('.wordmark'));
+initMobileNav();
 
-// 优先用 API Key（SDK 用户直接带 key 访问），否则用登录会话
-const params = new URLSearchParams(location.search);
-const KEY = params.get('key') || localStorage.getItem('ohpmt_member_key') || '';
-if (KEY) localStorage.setItem('ohpmt_member_key', KEY);
+/* 会话：优先用成员自己存下的 API Key（SDK 用户直接带 key 访问），
+   否则靠登录 cookie。不读 URL 上的 ?key=——那个地址会留在浏览器历史、
+   Referer 和反向代理的访问日志里。 */
+const KEY = localStorage.getItem('ohpmt_member_key') || '';
 
-let MODEL_NAMES = {};
+let DASH = null;               // /api/me 的结果
+const MODEL_NAMES = {};        // 展示名兜底：老记录里可能出现目录外的 key
 
-async function api(path) {
+const ST = {
+  ovMeasure: 'cost',           // 概览趋势图看成本还是 token
+  chan: '',                    // 用量页的通道筛选：'' / plan / api
+  days: 7,
+  calls: { page: 1, size: 20, rows: [], total: 0, pages: 1, cap: 3000 },
+  newKeyKind: 'plan',
+};
+
+async function api(path, opts = {}) {
   const headers = KEY ? { Authorization: 'Bearer ' + KEY } : {};
-  const res = await fetch(path, { headers, credentials: 'same-origin' });
+  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers,
+    credentials: 'same-origin',
+    body: opts.body,
+  });
   if (res.status === 401) {
     location.href = '/login';
     throw new Error('请先登录');
@@ -162,132 +508,583 @@ async function api(path) {
   return data;
 }
 
+const money = v => fmtMoney(Number(v) || 0);
+const pct = v => (v == null ? '—' : Number(v).toFixed(1) + '%');
+const chanLabel = c => (c === 'api' ? 'API' : 'PLAN');
+
+/* 成本类百分比条：<80 正常，>=80 黄，>=100 红。
+   两条通道的额度都靠它显示，所以单独抽出来。 */
+// 进度条画的是「已占份额」，不是「已花成本 / 档位额度」：额度按模型各算
+// 一份，¥64 花在 100 元档位里可能已经占满（某个模型被调小），拿成本算会
+// 显示 64% 却根本调不动。
+function quotaLine(name, pv, foot) {
+  const limited = pv != null;
+  const v = limited ? Math.min(100, pv) : 0;
+  const tone = v >= 100 ? 'err' : v >= 80 ? 'warn' : '';
+  return `<div class="ql">
+    <div class="ql-head"><span>${esc(name)}</span>
+      <b class="${tone}">${limited ? v.toFixed(1) + '%' : '不限'}</b></div>
+    <div class="meter ${tone}"><i style="width:${limited ? v : 0}%"></i></div>
+    ${foot ? `<div class="ql-foot">${foot}</div>` : ''}
+  </div>`;
+}
+
+function fmtWhen(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+       + `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function statusPill(r) {
+  return r.status === 200
+    ? '<span class="pill ok">成功</span>'
+    : `<span class="pill err" title="${esc(r.error || '')}">${
+        esc(r.error || r.status)}</span>`;
+}
+
+/* ───────── 导航 ───────── */
 function show(page) {
-  document.querySelectorAll('#nav a').forEach(a =>
+  document.querySelectorAll('#nav a, #nav-mobile-menu a').forEach(a =>
     a.classList.toggle('active', a.dataset.page === page));
   document.querySelectorAll('.page').forEach(p =>
     p.classList.toggle('active', p.id === 'page-' + page));
+  if (page === 'usage') { paintUsChart(); }
+  if (page === 'models') { /* 数据随 DASH 一起到位，无需另取 */ }
 }
-document.querySelectorAll('#nav a[data-page]').forEach(a =>
-  a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); }));
+document.querySelectorAll('#nav a, #nav-mobile-menu a').forEach(a =>
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    location.hash = a.dataset.page;
+  }));
 
-const modelName = id => MODEL_NAMES[id] || id || '未知';
-let DASH = null;
+/* 移动端抽屉菜单归 /assets/nav-mobile.js，后台与控制台共用。 */
+/* ───────── 概览 ───────── */
+function paintOverview() {
+  const q = DASH.quota || {};
+  const ch = DASH.channels || {};
+  const plan = ch.plan || { requests: 0, cost: 0, tokens: 0 };
+  const api = ch.api || { requests: 0, cost: 0, tokens: 0 };
+  const totals = DASH.totals || {};
 
-async function load() {
+  document.getElementById('who-name').textContent = DASH.member.name;
+  document.getElementById('who-sub').textContent =
+    DASH.member.email || DASH.member.username || '';
+  document.title = DASH.member.name + ' · oh-pmt-api';
+  document.getElementById('acct-user').textContent =
+    DASH.member.username || DASH.member.email || DASH.member.name;
+
+  document.getElementById('ov-kpi').innerHTML = `
+    <div class="kpi">
+      <div class="k">今日消耗</div>
+      <div class="v"><span data-count="${q.used_today || 0}" data-dec="2">0</span><small>元</small></div>
+      <div class="d">PLAN ${money(plan.cost)} · API ${money(api.cost)}</div>
+    </div>
+    <div class="kpi">
+      <div class="k">累计消耗</div>
+      <div class="v"><span data-count="${q.used_total || 0}" data-dec="2">0</span><small>元</small></div>
+      <div class="d">共 ${fmtInt(totals.requests || 0)} 次请求</div>
+    </div>
+    <div class="kpi">
+      <div class="k">周额度已用</div>
+      <div class="v">${pct(q.pct_total)}</div>
+      <div class="d">${q.pct_total != null ? '按各模型份额累计' : '不限周额度'}</div>
+    </div>
+    <div class="kpi">
+      <div class="k">API 余额</div>
+      <div class="v"><span data-count="${DASH.api.balance || 0}" data-dec="2">0</span><small>元</small></div>
+      <div class="d">${DASH.api.balance > 0 ? '可以直接用' : '需管理员发放'}</div>
+    </div>`;
+  document.querySelectorAll('#ov-kpi [data-count]').forEach(n =>
+    countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
+
+  document.getElementById('ov-tier').textContent = (q.tier || 'plus').toUpperCase();
+  const reset = q.reset_at
+    ? `${new Date(q.reset_at * 1000).toLocaleTimeString('zh-CN',
+        { hour: '2-digit', minute: '2-digit' })} 重置`
+    : '';
+  // 只报百分比：额度按模型各算一份，折算回成本反而会引起歧义
+  document.getElementById('ov-quota').innerHTML =
+    quotaLine('日额度', q.pct_today,
+      q.pct_today != null ? (reset || '每天 0 点清零') : '不限') +
+    quotaLine('周额度', q.pct_total, q.pct_total != null ? '' : '不限');
+
+  const bal = DASH.api.balance || 0;
+  const apiSpent = api.cost || 0;
+  const base = Math.max(bal + apiSpent, 0.000001);
+  const apiPct = Math.min(100, bal / base * 100);
+  document.getElementById('ov-api-sub').textContent =
+    api.requests ? `已用 ${fmtInt(api.requests)} 次` : '还没用过';
+  document.getElementById('ov-api').innerHTML = `
+    <div class="ql">
+      <div class="ql-head"><span>可用余额</span><b>${money(bal)}</b></div>
+      <div class="meter"><i style="width:${apiPct}%"></i></div>
+      <div class="ql-foot">余额归零后请求返回 429</div>
+    </div>
+`;
+
+  paintOvChart();
+  renderRecent();
+}
+
+function paintOvChart() {
+  const el = document.getElementById('ov-chart');
+  if (!el || !DASH) return;
+  const daily = DASH.daily_all || [];
+  const isCost = ST.ovMeasure === 'cost';
+  lineChart(el, {
+    labels: daily.map(x => x.date),
+    series: [{
+      name: isCost ? '成本' : 'Token',
+      color: 'var(--p-accent)',
+      values: daily.map(x => (isCost ? x.cost : x.tokens) || 0),
+    }],
+    area: true, height: 200, dots: true,
+    yFmt: isCost ? fmtMoney : fmtCompact,
+  });
+}
+
+function renderRecent() {
+  const rows = (DASH.recent || []).slice(0, 10);
+  const body = document.getElementById('ov-recent');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">还没有调用记录</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(r => `<tr>
+    <td class="mono" style="font-size:11.5px">${fmtWhen(r.created_at)}</td>
+    <td>${esc(r.model || '—')}</td>
+    <td><span class="pill">${chanLabel(r.channel)}</span></td>
+    <td class="num">${fmtInt(r.total_tokens)}</td>
+    <td class="num">${money(r.cost)}</td>
+    <td>${statusPill(r)}</td>
+  </tr>`).join('');
+}
+
+/* ───────── 用量 ───────── */
+function paintUsage() {
+  const ch = DASH.channels || {};
+  const plan = ch.plan || {};
+  const api = ch.api || {};
+  const pick = ST.chan ? (ch[ST.chan] || {}) : null;
+
+  const card = (label, cell) => `
+    <div class="kpi">
+      <div class="k">${esc(label)}</div>
+      <div class="v"><span data-count="${cell.requests || 0}" data-dec="0">0</span><small>次</small></div>
+      <div class="d">失败 ${fmtInt(cell.errors || 0)} · Token ${fmtCompact(cell.tokens || 0)}</div>
+    </div>`;
+
+  document.getElementById('us-kpi').innerHTML = ST.chan
+    ? `${card(chanLabel(ST.chan) + ' 请求', pick)}
+       <div class="kpi"><div class="k">${chanLabel(ST.chan)} 成本</div>
+         <div class="v">${money(pick.cost)}</div>
+         <div class="d">合计，单位元</div></div>
+       <div class="kpi"><div class="k">Token</div>
+         <div class="v">${fmtCompact(pick.tokens || 0)}</div>
+         <div class="d">输入与输出合计</div></div>`
+    : `${card('PLAN 通道', plan)}${card('API 通道', api)}
+       <div class="kpi"><div class="k">两通道合计成本</div>
+         <div class="v">${money((plan.cost || 0) + (api.cost || 0))}</div>
+         <div class="d">仅作参考，两条通道口径不同</div></div>`;
+
+  document.querySelectorAll('#us-kpi [data-count]').forEach(n =>
+    countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
+
+  paintUsChart();
+  renderUsModels();
+  loadCalls();
+}
+
+function paintUsChart() {
+  const el = document.getElementById('us-chart');
+  if (!el || !DASH) return;
+  const daily = DASH.daily_all || [];
+  lineChart(el, {
+    labels: daily.map(x => x.date),
+    series: [{
+      name: '成本', color: 'var(--p-accent)',
+      values: daily.map(x => x.cost || 0),
+    }],
+    area: true, height: 190, dots: true, yFmt: fmtMoney,
+  });
+}
+
+function renderUsModels() {
+  // 通道筛选只作用于汇总数字与明细：按模型的表来自 /api/me 的合并口径，
+  // 那里已经按对外模型名折过，再按通道拆需要另一次请求，收益不大。
+  const rows = (DASH.by_model || []).slice().sort((a, b) => b.cost - a.cost);
+  const body = document.getElementById('us-models');
+  document.getElementById('us-model-note').textContent =
+    `${rows.length} 个模型`;
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">还没有调用记录</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(r => `<tr>
+    <td>${esc(r.model)}</td>
+    <td class="num">${fmtInt(r.requests)}</td>
+    <td class="num">${fmtCompact(r.prompt_tokens || 0)}</td>
+    <td class="num">${fmtCompact(r.completion_tokens || 0)}</td>
+    <td class="num">${r.cache_rate == null ? '—' : pct(r.cache_rate)}</td>
+    <td class="num">${money(r.cost)}</td>
+    <td class="num">${pct(r.success_rate)}</td>
+  </tr>`).join('');
+}
+
+async function loadCalls() {
+  const body = document.getElementById('us-calls');
+  const pager = document.getElementById('us-pager');
+  if (!body) return;
+  const c = ST.calls;
+  if (!c.rows.length) body.innerHTML = '<tr><td colspan="7" class="empty">正在读取…</td></tr>';
   try {
-    const d = await api('/api/me');
-    DASH = d;
-    MODEL_NAMES = {};
-    (d.models || []).forEach(m => { MODEL_NAMES[m.id] = m.name; });
-
-    document.getElementById('who-name').textContent = d.member.name;
-    document.getElementById('who-sub').textContent =
-      d.member.email || d.member.username || '';
-    document.title = d.member.name + ' · oh-pmt-api';
-
-    const q = d.quota;
-    const card = (label, used, limit, left) => {
-      if (!limit) {
-        return `<div class="quota-card">
-          <div class="label">${label}</div>
-          <div class="big"><span data-count="${used}" data-dec="2">0</span><small>积分</small></div>
-          <div class="of">不限上限 · 已用 ${Number(used).toFixed(2)}</div>
-        </div>`;
-      }
-      const pct = Math.min(100, (used / limit) * 100);
-      const cls = pct >= 95 ? 'progress err' : pct >= 70 ? 'progress warn' : 'progress';
-      return `<div class="quota-card">
-        <div class="label">${label}</div>
-        <div class="big"><span data-count="${left}" data-dec="2">0</span><small>剩余</small></div>
-        <div class="of">已用 ${Number(used).toFixed(2)} / 上限 ${Number(limit).toFixed(1)}</div>
-        <div class="${cls}" style="margin-top:12px"><div data-w="${pct.toFixed(1)}"></div></div>
-      </div>`;
-    };
-    document.getElementById('quota-grid').innerHTML =
-      card('今日积分', q.used_today, q.limit_daily, q.left_today) +
-      card('本周积分', q.used_week, q.limit_weekly, q.left_week);
-    document.querySelectorAll('[data-count]').forEach(n =>
-      countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
-    requestAnimationFrame(() => document.querySelectorAll('.progress > div[data-w]')
-      .forEach(d => { d.style.width = d.dataset.w + '%'; }));
-
-    lineChart(document.getElementById('my-chart'), {
-      labels: (d.daily || []).map(x => x.date),
-      series: [{ name: '积分', color: 'var(--gold)', values: (d.daily || []).map(x => x.credits) }],
-      area: true, height: 200, yFmt: v => Number(v).toFixed(2),
+    const qs = new URLSearchParams({ days: ST.days, page: c.page, size: c.size });
+    if (ST.chan) qs.set('channel', ST.chan);
+    const r = await api('/api/me/usage?' + qs);
+    Object.assign(c, {
+      rows: r.rows, total: r.total, pages: r.pages,
+      cap: r.cap, page: r.page,
     });
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`;
+    pager.innerHTML = '';
+    return;
+  }
+  body.innerHTML = c.rows.length ? c.rows.map(r => `<tr>
+    <td class="mono" style="font-size:11.5px">${fmtWhen(r.created_at)}</td>
+    <td>${esc(r.model || '—')}</td>
+    <td><span class="pill">${chanLabel(r.channel)}</span></td>
+    <td class="num">${fmtInt(r.prompt_tokens || 0)}</td>
+    <td class="num">${fmtInt(r.completion_tokens || 0)}</td>
+    <td class="num">${money(r.cost)}</td>
+    <td>${statusPill(r)}</td>
+  </tr>`).join('')
+    : '<tr><td colspan="7" class="empty">这段时间没有调用记录</td></tr>';
 
-    // 按模型汇总当前可见的数据
-    const byModel = {};
-    (d.recent || []).forEach(r => {
-      const cell = byModel[r.model] = byModel[r.model] ||
-        { id: r.model, requests: 0, credits: 0, tokens: 0, ok: 0 };
-      cell.requests += 1;
-      cell.credits += Number(r.credits || 0);
-      cell.tokens += Number(r.total_tokens || 0);
-      if (r.status === 200) cell.ok += 1;
-    });
-    hbarList(document.getElementById('my-models'), {
-      rows: Object.values(byModel).sort((a, b) => b.credits - a.credits)
-        .map(m => ({ label: modelName(m.id), value: m.credits })),
-      fmt: v => v.toFixed(3), unit: ' 积分',
-    });
+  const over = c.total > c.cap;
+  pager.innerHTML = `
+    <span>共 ${fmtInt(c.total)} 条${over ? `，最多显示 ${fmtInt(c.cap)} 条` : ''}</span>
+    <span class="spacer"></span>
+    <label style="display:flex;align-items:center;gap:6px">每页
+      <select id="pg-size">
+        ${[20, 50, 100].map(n => `<option value="${n}" ${
+          n === c.size ? 'selected' : ''}>${n}</option>`).join('')}
+      </select></label>
+    <button class="btn small" id="pg-prev" ${c.page <= 1 ? 'disabled' : ''}>上一页</button>
+    <span>${c.page} / ${c.pages}</span>
+    <button class="btn small" id="pg-next" ${c.page >= c.pages ? 'disabled' : ''}>下一页</button>`;
+}
 
-    const body = document.getElementById('my-recent');
-    body.innerHTML = (d.recent || []).length ? d.recent.map(r => `<tr>
-      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
-        { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-      <td>${esc(modelName(r.model))}</td>
-      <td class="num">${Number(r.credits).toFixed(4)}</td>
-      <td class="num">${fmtInt(r.total_tokens)}</td>
-      <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
-        : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
-    </tr>`).join('') : '<tr><td colspan="5" class="empty">还没有调用记录</td></tr>';
+/* ───────── API：密钥与流水 ───────── */
+function renderKeys() {
+  const groups = { plan: [], api: [] };
+  (DASH.keys || []).forEach(k => {
+    const target = k.kind === 'api' ? groups.api : groups.plan;
+    target.push(k);
+  });
 
-    document.getElementById('model-list').innerHTML = d.models.length
-      ? d.models.map(m => `<div style="display:flex;gap:10px;align-items:baseline;
-          padding:6px 0;border-bottom:1px solid var(--rule)">
-          <span style="min-width:190px">${esc(m.name)}</span>
-          <span class="mono" style="color:var(--ink-faint);font-size:11px">${esc(m.id)}</span>
-        </div>`).join('')
-      : '<div class="empty">管理员还没有为你开放模型</div>';
+  const one = k => `<div class="keyrow">
+    <div class="keyrow-main">
+      <div>${k.name ? esc(k.name) : '<span class="hint">未命名</span>'}
+        ${k.enabled ? '' : '<span class="pill off">已停用</span>'}</div>
+      <div class="mono" style="font-size:11.5px;color:var(--p-text-3)">${esc(k.prefix)}…</div>
+      <div class="use">${fmtInt(k.requests)} 次 · ${fmtCompact(k.tokens)} token
+        · ${money(k.cost)} · ${fmtWhen(k.last_used)}</div>
+    </div>
+    <div class="keyrow-act">
+      <button class="btn small ghost" data-del-key="${k.id}"
+        data-key-name="${esc(k.name || k.prefix)}">删除</button>
+    </div>
+  </div>`;
 
-    document.getElementById('key-info').innerHTML = `
-      ${d.member.username ? `<div class="kv" style="display:flex;justify-content:space-between;padding:6px 0"><span class="hint">登录账号</span><span class="mono">${esc(d.member.username)}</span></div>` : ''}
-      ${d.key.value ? `<div class="keybox" style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-          <span style="word-break:break-all">${esc(d.key.value)}</span>
-          <button class="small copy-btn" data-key="${esc(d.key.value)}" style="flex:none">复制</button></div>`
-        : (d.key.prefix ? `<div class="mono">密钥前缀：${esc(d.key.prefix)}…</div>` : '')}
-      <div class="hint" style="margin-top:12px">允许的来源 IP：${
-        d.key.ip_allowlist ? esc(d.key.ip_allowlist) : '不限制'}</div>
-      ${d.preferred_account ? `<div class="hint">优先使用的账号：${esc(d.preferred_account)}</div>` : ''}`;
+  const box = (ch) => {
+    const list = groups[ch];
+    return list.length
+      ? list.map(one).join('')
+      : `<div class="empty">还没有 ${chanLabel(ch)} 通道的密钥</div>`;
+  };
+  document.getElementById('keys-plan').innerHTML = box('plan');
+  document.getElementById('keys-api').innerHTML = box('api');
 
-    const base = location.origin + '/v1/chat/completions';
-    const model = d.models.length ? d.models[0].id : 'qfmodel';
-    document.getElementById('api-url').textContent = base;
-    document.getElementById('curl-example').textContent =
-`curl ${base} \\
-  -H "Authorization: Bearer ${d.key.value || (d.key.prefix ? d.key.prefix + '...' : '你的密钥')}" \\
+  document.getElementById('api-ledger').innerHTML = (DASH.api.ledger || []).length
+    ? `<div class="table-wrap"><table>
+        <thead><tr><th>时间</th><th>说明</th><th class="num">成本</th></tr></thead>
+        <tbody>${DASH.api.ledger.map(r => `<tr>
+          <td class="mono" style="font-size:11.5px">${fmtWhen(r.created_at)}</td>
+          <td>${esc(r.note || '—')}</td>
+          <td class="num" style="color:${r.amount < 0 ? 'var(--p-text-3)' : 'var(--p-ok)'}">
+            ${r.amount > 0 ? '+' : ''}${money(r.amount)}</td>
+        </tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty">还没有调用记录</div>';
+}
+
+function paintApi() {
+  const base = location.origin + '/v1';
+  document.getElementById('api-url').textContent = base;
+  // 示例用对外模型名：/v1/models 返回的 id 就是这个。没有可用模型时
+  // 留占位，不拿上游 key 充数——那会把账号池的内部命名带到页面上。
+  // 示例给 plan 密钥：api 通道要管理员先发余额才能用，拿它做示例会让新成员
+  // 第一次调用就撞上 429 api_balance_exhausted。两把都有时优先 plan。
+  const model = (DASH.models || []).length ? DASH.models[0].name : '模型名';
+  const keys = DASH.keys || [];
+  const planKey = keys.find(k => k.kind === 'plan');
+  const sample = planKey || keys[0];
+  const shown = sample ? sample.prefix + '…' : '你的密钥';
+  document.getElementById('curl-example').textContent =
+`curl ${base}/chat/completions \\
+  -H "Authorization: Bearer ${shown}" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"${model}","messages":[{"role":"user","content":"你好"}]}'`;
+  renderKeys();
+  paintApiChannelState();
+}
+
+/* API 通道余额为 0 时禁掉「新建密钥」。
+   这条通道的准入只看余额，余额为 0 时建出来的密钥第一次调用就被 429
+   挡掉，而成员看到的却是一句「创建成功」。不如在按钮上就拦住。 */
+function apiBalanceOk() {
+  return (DASH && DASH.api && DASH.api.balance > 0);
+}
+
+function paintApiChannelState() {
+  const btn = document.getElementById('btn-new-api-key');
+  const note = document.getElementById('api-balance-note');
+  if (!btn || !note) return;
+  const ok = apiBalanceOk();
+  btn.disabled = !ok;
+  note.hidden = ok;
+  note.textContent = ok ? '' :
+    '当前余额为 0，还不能建 API 密钥。请联系管理员发放后再来创建；'
+    + '现在调用请用上面的 PLAN 通道密钥。';
+}
+
+/* ───────── 模型 ───────── */
+const F_PRICE = v => {
+  // 单价常见两位以上小数（缓存价 0.02 这种），固定两位会把 0.014 显示成 0.01
+  if (v == null) return '—';
+  const n = Number(v);
+  if (!n) return '0';
+  return String(Number(n.toFixed(3)));
+};
+
+function priceCell(m, field) {
+  const rng = m.price_range && m.price_range[field];
+  if (rng && rng[0] !== rng[1]) return `${F_PRICE(rng[0])}–${F_PRICE(rng[1])}`;
+  return F_PRICE((m.price || {})[field]);
+}
+
+function paintModels() {
+  const rows = DASH.models || [];
+  document.getElementById('md-note').textContent =
+    `${rows.length} 个可用模型`;
+  const body = document.getElementById('md-rows');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty">管理员还没有为你开放模型</td></tr>';
+    return;
+  }
+  // 限额就是这个模型能用到多少（元），日 / 周各一份，默认等于档位额度
+  body.innerHTML = rows.map(m => {
+    const ld = Number(m.limit_daily || 0);
+    const lt = Number(m.limit_total || 0);
+    const cell = v => (v > 0 ? money(v) : '不限');
+    return `<tr>
+      <td>${esc(m.name)}
+        <div class="hint" style="font-family:var(--font-mono,monospace);font-size:10.5px">${esc(m.id)}</div></td>
+      <td class="num">${priceCell(m, 'input')}</td>
+      <td class="num">${priceCell(m, 'output')}</td>
+      <td class="num">${priceCell(m, 'cache_read')}</td>
+      <td class="num">${cell(ld)}<span class="cap"> / ${cell(lt)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ───────── 加载 ───────── */
+async function load() {
+  try {
+    const d = await api('/api/me?days=30');
+    DASH = d;
+    (d.models || []).forEach(m => { MODEL_NAMES[m.id] = m.name; });
+    paintOverview();
+    paintUsage();
+    paintApi();
+    paintModels();
   } catch (e) {
-    document.getElementById('quota-grid').innerHTML = `<div class="note">${esc(e.message)}</div>`;
+    toast(e.message, 'err');
+    document.getElementById('ov-quota').innerHTML =
+      `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
-document.addEventListener('click', e => {
-  const btn = e.target.closest('.copy-btn');
-  if (!btn) return;
-  const text = btn.dataset.key;
-  const done = () => {
-    const o = btn.textContent;
-    btn.textContent = '已复制';
-    setTimeout(() => { btn.textContent = o; }, 1400);
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done).catch(() => alert(text));
-  } else alert(text);
+/* ───────── 密钥弹窗 ───────── */
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function kindHint(kind) {
+  if (kind === 'api') {
+    return apiBalanceOk()
+      ? 'API 通道按赠礼余额扣，每次调用从余额里减，余额归零后请求会被拒。'
+      : 'API 通道还没有余额，建出来的密钥调不通。需要管理员先发放。';
+  }
+  return 'PLAN 通道按档位额度扣，日额度每天 0 点重置。';
+}
+
+function openNewKey(kind) {
+  ST.newKeyKind = kind === 'api' ? 'api' : 'plan';
+  document.getElementById('mk-name').value = '';
+  // 余额为 0 时不让选 API：服务端也会拒，前端先说清楚原因
+  const apiBtn = document.querySelector('#mk-kind button[data-kind="api"]');
+  if (apiBtn) apiBtn.disabled = !apiBalanceOk();
+  if (ST.newKeyKind === 'api' && !apiBalanceOk()) ST.newKeyKind = 'plan';
+  document.querySelectorAll('#mk-kind button').forEach(b =>
+    b.classList.toggle('on', b.dataset.kind === ST.newKeyKind));
+  document.getElementById('mk-kind-hint').textContent = kindHint(ST.newKeyKind);
+  openModal('mk-key');
+  document.getElementById('mk-name').focus();
+}
+
+async function submitNewKey() {
+  const btn = document.getElementById('mk-submit');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/me/keys', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: document.getElementById('mk-name').value.trim(),
+        kind: ST.newKeyKind,
+      }),
+    });
+    closeModal('mk-key');
+    document.getElementById('show-key-val').textContent = d.key;
+    document.getElementById('show-key-copy').dataset.key = d.key;
+    document.getElementById('show-key-ok').checked = false;
+    document.getElementById('show-key-close').disabled = true;
+    openModal('show-key');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  btn.disabled = false;
+}
+
+async function deleteKey(id, name) {
+  if (!confirm(`删除密钥「${name}」？用它的客户端会立即失效。`)) return;
+  try {
+    await api('/api/me/keys/' + id, { method: 'DELETE' });
+    await load();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function savePassword() {
+  const oldPw = document.getElementById('pw-old').value;
+  const newPw = document.getElementById('pw-new').value;
+  const again = document.getElementById('pw-new2').value;
+  const msg = document.getElementById('pw-msg');
+  if (newPw !== again) { msg.textContent = '两次输入的新密码不一致'; return; }
+  if (newPw.length < 6) { msg.textContent = '新密码至少 6 位'; return; }
+  try {
+    await api('/api/me/password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    });
+    msg.textContent = '已更新';
+    ['pw-old', 'pw-new', 'pw-new2'].forEach(id =>
+      document.getElementById(id).value = '');
+  } catch (e) { msg.textContent = e.message; }
+}
+
+/* ───────── 事件（全部走委托，内容每次都是新节点） ───────── */
+document.addEventListener('click', async e => {
+  const t = e.target;
+
+  if (t.id === 'btn-refresh') { load(); return; }
+  if (t.id === 'btn-pw') { savePassword(); return; }
+  if (t.id === 'mk-submit') { submitNewKey(); return; }
+  if (t.closest('[data-close]')) {
+    closeModal(t.closest('[data-close]').dataset.close);
+    return;
+  }
+
+  const nk = t.closest('[data-new-key]');
+  if (nk) { openNewKey(nk.dataset.newKey); return; }
+
+  const mk = t.closest('#mk-kind button');
+  if (mk) {
+    ST.newKeyKind = mk.dataset.kind;
+    document.querySelectorAll('#mk-kind button').forEach(b =>
+      b.classList.toggle('on', b === mk));
+    document.getElementById('mk-kind-hint').textContent = kindHint(ST.newKeyKind);
+    return;
+  }
+
+  const del = t.closest('[data-del-key]');
+  if (del) {
+    deleteKey(Number(del.dataset.delKey), del.dataset.keyName);
+    return;
+  }
+
+  const meas = t.closest('#ov-measure button');
+  if (meas) {
+    ST.ovMeasure = meas.dataset.measure;
+    document.querySelectorAll('#ov-measure button').forEach(b =>
+      b.classList.toggle('on', b === meas));
+    paintOvChart();
+    return;
+  }
+
+  const chan = t.closest('#us-channel button');
+  if (chan) {
+    ST.chan = chan.dataset.chan;
+    document.querySelectorAll('#us-channel button').forEach(b =>
+      b.classList.toggle('on', b === chan));
+    ST.calls.page = 1;
+    paintUsage();
+    return;
+  }
+
+  const days = t.closest('#us-days button');
+  if (days) {
+    ST.days = Number(days.dataset.days);
+    document.querySelectorAll('#us-days button').forEach(b =>
+      b.classList.toggle('on', b === days));
+    ST.calls.page = 1;
+    loadCalls();
+    return;
+  }
+
+  if (t.id === 'pg-prev' && ST.calls.page > 1) {
+    ST.calls.page--; loadCalls(); return;
+  }
+  if (t.id === 'pg-next' && ST.calls.page < ST.calls.pages) {
+    ST.calls.page++; loadCalls(); return;
+  }
+
+  if (t.id === 'show-key-copy') {
+    const text = t.dataset.key || '';
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(
+        () => { t.textContent = '已复制'; }, () => alert(text));
+    } else alert(text);
+    return;
+  }
+  if (t.id === 'show-key-close') {
+    closeModal('show-key');
+    await load();
+    return;
+  }
+});
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'pg-size') {
+    ST.calls.size = Number(e.target.value);
+    ST.calls.page = 1;
+    loadCalls();
+    return;
+  }
+  // 勾了「我已保存好」才让关，避免没存就关掉
+  if (e.target.id === 'show-key-ok') {
+    document.getElementById('show-key-close').disabled = !e.target.checked;
+  }
 });
 
 document.getElementById('logout').addEventListener('click', async e => {
@@ -297,15 +1094,21 @@ document.getElementById('logout').addEventListener('click', async e => {
   location.href = '/login';
 });
 
-document.addEventListener('themechange', () => { if (DASH) load(); });
+// 换主题只是 CSS 变量变了，数据没变，重画图表就够
+document.addEventListener('themechange', () => {
+  if (DASH) { paintOvChart(); paintUsChart(); }
+});
+
+const yearEl = document.getElementById('year');
+if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
 // 地址栏 hash 直达某一页（刷新后停在同一页）
-const initial = location.hash.replace('#', '');
-if (initial && document.getElementById('page-' + initial)) show(initial);
-addEventListener('hashchange', () => {
+function route() {
   const page = location.hash.replace('#', '');
-  if (page && document.getElementById('page-' + page)) show(page);
-});
+  show(page && document.getElementById('page-' + page) ? page : 'overview');
+}
+addEventListener('hashchange', route);
+route();
 load();
 </script>
 </body>

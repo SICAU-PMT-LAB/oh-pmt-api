@@ -258,6 +258,21 @@ class UsageStatsTest(unittest.TestCase):
         self.assertEqual(len(stats[1]["by_model"]), 2)
         self.assertEqual(stats[2]["requests"], 1)
 
+    def test_unassigned_usage_counted_in_own_row(self):
+        """没分配账号就失败的请求补齐到一行，三个维度合计才对得上总量。"""
+        self._usage(model="gfmodel", credits=1.0)
+        self.store.record_usage(key_id=self.kid, member_id=self.mid,
+                                account_id=None, model="gfmodel",
+                                prompt_tokens=0, completion_tokens=0,
+                                status=503, error="no_account")
+        orphan = self.store.unassigned_summary(0)
+        self.assertEqual(orphan["requests"], 1)
+        self.assertEqual(orphan["errors"], 1)
+        self.assertEqual(orphan["tokens"], 0)
+        # 按账号汇总的那份仍然跳过 NULL，两者相加才等于总量
+        self.assertEqual(sum(s["requests"] for s in self.store.account_summary(0).values()), 1)
+        self.assertEqual(self.store.usage_totals(0)["requests"], 2)
+
     def test_member_model_summary(self):
         self._usage(model="gfmodel", credits=1.0)
         rows = self.store.member_model_summary(self.mid, 0)
@@ -289,14 +304,17 @@ class AccountViewTest(unittest.TestCase):
         kid, _ = self.store.create_key(member_id=mid)
         self.store.record_usage(key_id=kid, member_id=mid, account_id=self.account_id,
                                 model="gfmodel", prompt_tokens=100,
-                                completion_tokens=50, credits=0.5)
+                                completion_tokens=50, cost=0.012,
+                                credits=0.5)
         a = server.Handler._accounts_view(mock.Mock())[0]
         self.assertEqual(a["credits_total"], 500)
         self.assertEqual(a["credits_base_remaining"], 295)
         self.assertEqual(a["credits_addon_remaining"], 180)
         self.assertEqual(a["requests"], 1)
         self.assertEqual(a["tokens"], 150)
-        self.assertAlmostEqual(a["gateway_consumed"], 0.5)
+        self.assertAlmostEqual(a["gateway_cost"], 0.012)
+        # 上游积分只用于对账，不参与限额
+        self.assertAlmostEqual(a["gateway_credits"], 0.5)
         self.assertEqual(a["by_model"][0]["id"], "gfmodel")
 
     def test_checkin_state_persisted(self):
@@ -374,6 +392,72 @@ class AnalyticsTotalsTest(unittest.TestCase):
         self.assertEqual(a["by_model"][0]["requests"], 2)
         self.assertEqual(a["by_model"][0]["tokens"], 150)
         self.assertAlmostEqual(a["by_account"][0]["success_rate"], 50.0)
+
+    def _fake_catalog(self):
+        return {
+            "deepseek-v4.1-flash": {
+                "id": "deepseek-v4.1-flash", "name": "DeepSeek-V4.1-Flash",
+                "routes": [
+                    {"provider": "qoder", "region": "global", "model": "dfmodel"},
+                    {"provider": "workbuddy", "region": "cn",
+                     "model": "deepseek-v4.1-flash"},
+                ],
+            },
+        }
+
+    def test_same_model_merges_into_one_row(self):
+        """两家上游同一个模型会存两个不同 key，表里必须合并成一行。"""
+        server.all_models = lambda: self._fake_catalog()
+        for model in ("dfmodel", "deepseek-v4.1-flash", "dfmodel"):
+            self.store.record_usage(key_id=self.kid, member_id=self.mid,
+                                    account_id=1, model=model,
+                                    prompt_tokens=0, completion_tokens=0,
+                                    cost=0.1)
+        a = server.Handler._analytics(mock.Mock())
+        rows = [m for m in a["by_model"] if m["model"] == "DeepSeek-V4.1-Flash"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["requests"], 3)
+        self.assertAlmostEqual(rows[0]["cost"], 0.3)
+
+    def test_names_survive_empty_catalog(self):
+        """账号全在冷却、目录读不到时，历史记录的模型名仍要认得出来。"""
+        server.all_models = lambda: self._fake_catalog()
+        server.stable_model_names(self.store)
+        server.all_models = lambda: {}
+        a = server.Handler._analytics(mock.Mock())
+        self.assertEqual(a["model_names"].get("dfmodel"), "DeepSeek-V4.1-Flash")
+
+    def test_unassigned_request_shows_in_every_breakdown(self):
+        """没落到账号的请求也要在各维度合计里出现，否则总数对不上。"""
+        self.store.record_usage(key_id=self.kid, member_id=self.mid, account_id=1,
+                                model="glm-5.3-flash", prompt_tokens=0,
+                                completion_tokens=0, credits=0.2)
+        self.store.record_usage(key_id=self.kid, member_id=self.mid,
+                                account_id=None, model="glm-5.3-flash",
+                                prompt_tokens=0, completion_tokens=0,
+                                status=503, error="no_account")
+        a = server.Handler._analytics(mock.Mock())
+        total = a["totals"]["requests"]
+        self.assertEqual(total, 2)
+        self.assertEqual(sum(m["requests"] for m in a["by_model"]), total)
+        self.assertEqual(sum(x["requests"] for x in a["by_account"]), total)
+        self.assertEqual(sum(x["requests"] for x in a["by_provider"]), total)
+
+    def test_deleted_member_not_in_member_board(self):
+        """已删除成员的历史记录不进成员榜，否则会和「成员 N 人」对不上。"""
+        self.store.record_usage(key_id=self.kid, member_id=self.mid, account_id=1,
+                                model="glm-5.3-flash", prompt_tokens=0,
+                                completion_tokens=0)
+        # member 999 已经不存在了，但库里还留着它的历史记录
+        self.store.record_usage(key_id=self.kid, member_id=999, account_id=1,
+                                model="glm-5.3-flash", prompt_tokens=0,
+                                completion_tokens=0)
+        a = server.Handler._analytics(mock.Mock())
+        rows = a["by_member"]
+        self.assertEqual([m["id"] for m in rows], [self.mid])
+        self.assertEqual(rows[0]["requests"], 1)
+        # 总量仍然把已删除成员的请求算进去，两个口径不矛盾
+        self.assertEqual(a["totals"]["requests"], 2)
 
 
 if __name__ == "__main__":

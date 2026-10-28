@@ -1,0 +1,614 @@
+/* 登录页。
+   与 frontend/src/style.css 的暖中性色板一致：纸白 + 墨黑两套，切换时走
+   140ms 的颜色过渡。三段式入场：闸机面板 → 吊牌 → 翻转登录卡。 */
+
+:root {
+  --page: #fbfaf7;
+  --surface: #f2f1ec;
+  --nested: #e4e2da;
+  --hairline: #d0cec5;
+  --disabled: #a8a69d;
+  --hint: #6f6d66;
+  --secondary: #57554f;
+  --body: #40403b;
+  --title: #1c1c1a;
+
+  --inverse-bg: #1c1c1a;
+  --inverse-fg: #fbfaf7;
+
+  --success: #3f6b52;
+  --danger: #9c3b34;
+  --warning: #85642a;
+
+  --cosmos-opacity: 0.4;
+  --cosmos-nebula-bg: radial-gradient(
+    ellipse 60% 45% at 28% 32%,
+    rgba(156, 140, 96, 0.1),
+    transparent 70%
+  );
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --page: #111110;
+  --surface: #1c1c1a;
+  --nested: #2e2d2a;
+  --hairline: #40403b;
+  --disabled: #57554f;
+  --hint: #87847c;
+  --secondary: #a8a69d;
+  --body: #d0cec5;
+  --title: #fbfaf7;
+
+  --inverse-bg: #fbfaf7;
+  --inverse-fg: #1c1c1a;
+
+  --success: #8fbfa3;
+  --danger: #d99a94;
+  --warning: #c9ab6e;
+
+  --cosmos-opacity: 0.85;
+  --cosmos-nebula-bg: radial-gradient(
+    ellipse 62% 48% at 30% 30%,
+    rgba(150, 132, 92, 0.16),
+    rgba(60, 52, 38, 0.03) 60%,
+    transparent 78%
+  );
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+* { margin: 0; }
+
+body {
+  background: var(--page);
+  color: var(--title);
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+               Consolas, monospace;
+  min-height: 100vh;
+  overflow: hidden;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+input { font: inherit; }
+
+.login-root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  padding: 16px;
+  background: var(--page);
+}
+
+/* ---------------- 背景：星空 + 网格 ---------------- */
+
+.paper-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.paper-cosmos {
+  position: absolute;
+  inset: 0;
+  color: var(--title);
+  opacity: var(--cosmos-opacity);
+  transition: opacity 0.4s ease;
+}
+.cosmos-nebula {
+  position: absolute;
+  inset: -10%;
+  background: var(--cosmos-nebula-bg);
+  filter: blur(30px);
+}
+.cosmos-chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.cosmos-orbits { opacity: 0.34; }
+.cosmos-constellations { opacity: 0.42; }
+.star-twinkle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cosmos-twinkle 4.2s ease-in-out infinite alternate;
+}
+@keyframes cosmos-twinkle {
+  0% { opacity: 0.25; transform: scale(0.82); }
+  100% { opacity: 1; transform: scale(1.12); }
+}
+
+#grid-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------------- 顶栏按钮 ---------------- */
+
+.chrome-btn {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--title);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.chrome-btn:hover { background: var(--nested); }
+.chrome-btn[data-round] { width: 40px; padding: 0; justify-content: center; }
+/* 按钮里的图标按下时缩一下，和站点导航那颗一致 */
+.chrome-btn[data-round] svg {
+  transition: transform 400ms cubic-bezier(0.22, 0.9, 0.28, 1.04);
+}
+.chrome-btn[data-round]:active svg { transform: scale(0.86); }
+.theme-toggle {
+  top: calc(1.5rem + env(safe-area-inset-top));
+  right: calc(1.5rem + env(safe-area-inset-right));
+}
+/* 圆形的主页按钮，和右上角主题按钮同一颗样式；锚点要抹掉下划线，
+   否则悬停时会带出链接的装饰。 */
+.home-btn {
+  top: calc(1.5rem + env(safe-area-inset-top));
+  left: calc(1.5rem + env(safe-area-inset-left));
+  width: 40px; padding: 0; justify-content: center;
+  text-decoration: none;
+}
+.home-btn svg { transition: transform 400ms cubic-bezier(0.22, 0.9, 0.28, 1.04); }
+.home-btn:active svg { transform: scale(0.86); }
+.back-btn {
+  top: calc(1.5rem + env(safe-area-inset-top));
+  /* 排在主页按钮右侧：1.5rem 起点 + 40px 按钮 + 10px 间隔 */
+  left: calc(1.5rem + 50px + env(safe-area-inset-left));
+  display: none;
+}
+.back-btn[data-show] { display: flex; }
+@media (max-width: 560px) {
+  .theme-toggle { top: calc(1rem + env(safe-area-inset-top)); right: 1rem; }
+  .home-btn { top: calc(1rem + env(safe-area-inset-top)); left: 1rem; }
+  .back-btn { top: calc(1rem + env(safe-area-inset-top)); left: calc(1rem + 50px); }
+}
+
+/* 主题切换的圆形揭示，与站点页 site.css 同一套：关闭默认的交叉淡入，
+   新快照盖在最上层，由 login.js 从点击位置往外散开。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+/* 星空、网格 canvas 都在 html 下面，新快照必须盖住它们 */
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2147483646; }
+
+/* ---------------- 液态玻璃质感 ---------------- */
+
+.gate-panel,
+.flip-panel {
+  border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 12px rgba(28, 28, 26, 0.06);
+}
+html[data-theme="dark"] .gate-panel,
+html[data-theme="dark"] .flip-panel {
+  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------------- 闸机 ---------------- */
+
+[hidden] { display: none !important; }
+
+.gate-panel {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: calc(100vw - 32px);
+  border-radius: 4px;
+  padding: 56px 64px 44px;
+  transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+              filter 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.gate-panel[data-leaving] {
+  opacity: 0;
+  transform: scale(0.85);
+  filter: blur(8px);
+  pointer-events: none;
+}
+@media (max-width: 480px) {
+  .gate-panel { padding: 40px 24px 32px; }
+  .gate-wordmark { font-size: 34px !important; }
+}
+
+.gate-wordmark {
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--title);
+  display: flex;
+}
+.gate-wordmark span {
+  display: inline-block;
+  will-change: filter, opacity, transform;
+}
+.gate-sub {
+  margin-top: 12px;
+  font-size: 11px;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--hint);
+}
+.gate-divider {
+  margin-top: 28px;
+  width: 48px;
+  height: 1px;
+  background: var(--hairline);
+}
+.gate-actions {
+  margin-top: 28px;
+  display: flex;
+  gap: 12px;
+}
+.gate-btn {
+  border-radius: 2px;
+  padding: 10px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.gate-btn-primary {
+  background: var(--inverse-bg);
+  color: var(--inverse-fg);
+  border: 1px solid var(--inverse-bg);
+}
+.gate-btn-primary:hover { opacity: 0.85; }
+.gate-btn-ghost {
+  background: transparent;
+  color: var(--title);
+  border: 1px solid var(--hairline);
+}
+.gate-btn-ghost:hover { border-color: var(--title); }
+
+/* ---------------- 吊牌 ---------------- */
+
+.lanyard-badge-layer {
+  position: fixed;
+  inset: 0;
+  /* 闸机态下吊牌不存在：与 Vue 版的 v-if="state !== 'gate'" 等价 */
+  visibility: hidden;
+  overflow: hidden;
+  perspective: 900px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  z-index: 20;
+}
+.lanyard-badge-layer[data-active] { visibility: visible; }
+.rope {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.rope-path {
+  stroke: var(--title);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  fill: none;
+}
+.rope-anchor { fill: var(--title); }
+
+.badge-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 170px;
+  transform-origin: 50% 0;
+  border-radius: 14px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--title);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+  pointer-events: auto;
+  backface-visibility: hidden;
+}
+html[data-theme="dark"] .badge-card { box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6); }
+.badge-card.is-dragging { cursor: grabbing; }
+.badge-hole {
+  width: 14px;
+  height: 14px;
+  margin: 12px auto 0;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+}
+.badge-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 16px 20px;
+}
+.badge-mark {
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+.badge-divider { width: 36px; height: 1px; background: currentColor; opacity: 0.3; }
+.badge-name { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+.badge-title { font-size: 9px; letter-spacing: 0.32em; opacity: 0.55; }
+.badge-hint { display: flex; justify-content: center; padding-bottom: 14px; }
+.badge-hint-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.35;
+  animation: hint-pulse 2.4s ease-in-out infinite;
+}
+@keyframes hint-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.6); }
+}
+
+/* ---------------- 翻转登录卡 ---------------- */
+
+.panel-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  perspective: 1400px;
+}
+.flip-panel {
+  width: min(440px, 94vw);
+  max-height: 88dvh;
+  overflow-y: auto;
+  border-radius: 4px;
+  padding: 32px 36px;
+  transform: rotateY(-90deg) scale(0.55) translateZ(-160px);
+  opacity: 0;
+  transition: transform 0.55s cubic-bezier(0.22, 0.9, 0.28, 1.04),
+              opacity 0.3s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.flip-panel.enter {
+  transform: rotateY(0deg) scale(1) translateZ(0);
+  opacity: 1;
+}
+.flip-panel.shake { animation: panel-shake 0.45s ease; }
+@keyframes panel-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-14px); }
+  40% { transform: translateX(11px); }
+  60% { transform: translateX(-7px); }
+  80% { transform: translateX(4px); }
+}
+
+.panel-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.panel-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--inverse-bg);
+  color: var(--inverse-fg);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+.panel-brand { font-size: 15px; font-weight: 600; }
+.panel-close {
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 2px;
+  border: 0;
+  background: none;
+  color: var(--hint);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.panel-close:hover { color: var(--title); background: var(--nested); }
+
+/* 表单 */
+.panel-body { text-align: center; }
+.panel-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--title);
+  margin-bottom: 6px;
+}
+.panel-desc {
+  font-size: 13px;
+  color: var(--hint);
+  margin-bottom: 24px;
+}
+.field { text-align: left; margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--body);
+  margin-bottom: 6px;
+}
+.field-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.field-input > svg.icon {
+  position: absolute;
+  left: 12px;
+  color: var(--disabled);
+  pointer-events: none;
+}
+.field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px 0 40px;
+  border-radius: 3px;
+  border: 1px solid var(--hairline);
+  background: var(--page);
+  color: var(--title);
+  font-size: 14px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.field input::placeholder { color: var(--disabled); }
+.field input:focus {
+  outline: none;
+  border-color: var(--title);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--title) 10%, transparent);
+}
+.field input[aria-invalid="true"] { border-color: var(--danger); }
+.field .reveal {
+  position: absolute;
+  right: 4px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--hint);
+  border-radius: 2px;
+}
+.field .reveal:hover { color: var(--title); background: var(--nested); }
+.field-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.field-foot a { color: var(--hint); text-decoration: none; }
+.field-foot a:hover { color: var(--title); text-decoration: underline; }
+
+.submit {
+  width: 100%;
+  height: 44px;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 3px;
+  border: 1px solid var(--inverse-bg);
+  background: var(--inverse-bg);
+  color: var(--inverse-fg);
+  font-size: 14px;
+  font-weight: 600;
+  transition: opacity 160ms ease;
+}
+.submit:hover { opacity: 0.88; }
+.submit:disabled { opacity: 0.5; cursor: not-allowed; }
+.submit .spin {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.form-error {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--danger);
+  min-height: 18px;
+  text-align: left;
+}
+.panel-note {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--hint);
+  line-height: 1.7;
+  text-align: left;
+}
+.panel-note a { color: var(--body); }
+
+.copyright {
+  position: absolute;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  z-index: 10;
+  text-align: center;
+  font-size: 11px;
+  color: var(--disabled);
+}
+
+/* 入场级联：面板落位后子元素依次浮现 */
+.stagger > * {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.4s cubic-bezier(0.22, 0.9, 0.28, 1),
+              transform 0.4s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+.stagger.ready > * {
+  opacity: 1;
+  transform: none;
+}
+.stagger.ready > *:nth-child(1) { transition-delay: 0ms; }
+.stagger.ready > *:nth-child(2) { transition-delay: 45ms; }
+.stagger.ready > *:nth-child(3) { transition-delay: 90ms; }
+.stagger.ready > *:nth-child(4) { transition-delay: 135ms; }
+.stagger.ready > *:nth-child(5) { transition-delay: 180ms; }
+.stagger.ready > *:nth-child(6) { transition-delay: 225ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > * { opacity: 1; transform: none; transition: none; }
+  .star-twinkle, .badge-hint-dot { animation: none; }
+  .flip-panel { transition: opacity 0.2s ease; transform: none; }
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+  .chrome-btn[data-round] svg { transition: none; }
+}

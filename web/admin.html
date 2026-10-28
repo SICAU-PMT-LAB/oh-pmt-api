@@ -3,42 +3,79 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>oh-pmt-api · 管理后台</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/ui.css">
+<!-- 主题必须在首次绘制前落地：跨页跳转（如点账号详情）时样式表还没下载完，
+     先按记住的主题刷底色，否则深色模式下会闪一下白屏 -->
+<script>
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('pmt_site_theme'); } catch (e) {}
+  if (t !== 'dark' && t !== 'light') {
+    // 没手动选过就跟系统走，避免深色系统下先刷一帧白底
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark' : 'light';
+  }
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#0c0c0e' : '#ffffff';
+})();
+</script>
+<title>管理后台 · Prometheus API</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/panel.css">
 </head>
-<body>
-<div class="layout">
+<body data-page="site">
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
 
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-          <circle cx="12" cy="12" r="8.4" opacity=".45"/>
-          <circle cx="12" cy="12" r="4.6"/>
-          <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
-        </svg>
-        <h1>oh-pmt-api</h1>
-      </div>
-      <div class="kicker">管理后台</div>
-    </div>
+<div data-component="container">
+
+  <section data-component="top">
+    <a class="brand" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+      <span class="kicker">管理后台</span>
+    </a>
+
     <nav id="nav">
-      <a href="#overview" data-page="overview" class="active"><span class="ico">◈</span>概览</a>
-      <a href="#accounts" data-page="accounts"><span class="ico">◇</span>账号</a>
-      <a href="#members" data-page="members"><span class="ico">◉</span>成员</a>
-      <a href="#analytics" data-page="analytics"><span class="ico">▤</span>数据</a>
-      <a href="#settings" data-page="settings"><span class="ico">⌘</span>接入</a>
+      <a href="#overview" data-page="overview" class="active">概览</a>
+      <a href="#accounts" data-page="accounts">账号</a>
+      <a href="#members" data-page="members">成员</a>
+      <a href="#analytics" data-page="analytics">数据</a>
+      <a href="#pricing" data-page="pricing">定价</a>
     </nav>
-    <div class="sidebar-foot">
-      <div class="theme-toggle" title="切换明暗">
-        <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
-        <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
-      </div>
-      <div style="margin-top:12px">成员控制台 <span class="mono">/me</span></div>
+
+    <div class="top-actions">
+      <button type="button" class="theme-icon" id="theme-toggle"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a href="#" class="logout-btn" id="logout" aria-label="退出登录" title="退出登录"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="transform:scaleX(-1)"><path d="M6.75 4.5V3a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-.75.75h-6A.75.75 0 0 1 6.75 15v-1.5M9.75 9H2.25M9.75 9 7 6.25M9.75 9 7 11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg><span class="t">退出</span></a>
+      <button type="button" class="nav-toggle" aria-expanded="false"
+              aria-controls="nav-mobile-menu" aria-label="打开菜单">
+        <span class="sr-only">打开菜单</span>
+        <svg class="icon icon-hamburger" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="square"/>
+        </svg>
+        <svg class="icon icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                fill="currentColor"/>
+        </svg>
+      </button>
     </div>
-  </aside>
+  </section>
+
+  <div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+    <a href="#overview" data-page="overview" class="active">概览</a>
+    <a href="#accounts" data-page="accounts">账号</a>
+    <a href="#members" data-page="members">成员</a>
+    <a href="#analytics" data-page="analytics">数据</a>
+    <a href="#pricing" data-page="pricing">定价</a>
+  </div>
 
   <main class="main">
 
@@ -50,7 +87,9 @@
           <h2>概览</h2>
           <p>各家账号的额度余量、请求成功率与今天的消耗。</p>
         </div>
-        <button class="ghost small" onclick="reloadOverview(this)">刷新</button>
+        <div class="actions">
+          <button class="ghost small" onclick="reloadOverview(this)">刷新</button>
+        </div>
       </div>
 
       <div class="kpi-grid" id="ov-kpi"></div>
@@ -59,11 +98,11 @@
       <div class="grid-wide-left">
         <div class="chart-card">
           <div class="chart-head">
-            <span class="t">近 14 天 · 请求与积分</span>
+            <span class="t">近 14 天 · 请求与成本</span>
             <span class="spacer"></span>
             <div class="chart-legend">
               <span class="li"><span class="sw" style="background:var(--gold)"></span>请求</span>
-              <span class="li"><span class="sw" style="background:var(--bronze)"></span>积分</span>
+              <span class="li"><span class="sw" style="background:var(--bronze)"></span>成本</span>
             </div>
           </div>
           <div id="ov-trend"></div>
@@ -90,7 +129,7 @@
           <span class="spacer"></span>
           <span class="s" id="ov-model-note"></span>
         </div>
-        <div class="table-wrap"><table id="ov-models"></table></div>
+        <div class="table-wrap"><table id="ov-models" class="stack"></table></div>
       </div>
     </section>
 
@@ -100,9 +139,9 @@
         <div>
           <div class="eyebrow">Accounts</div>
           <h2>账号</h2>
-          <p>按来源厂商分组。点开一张卡片查看该厂商下的账号，再点账号进入详情。</p>
+          <p>按来源厂商分组。点卡片进入该厂商的账号页，再点账号看详情。</p>
         </div>
-        <div style="display:flex;gap:8px">
+        <div class="actions">
           <button class="primary" onclick="openAccountModal()">接入账号</button>
           <button onclick="openImportModal()">导入文件</button>
           <button onclick="checkinAll(this)">一键签到</button>
@@ -113,15 +152,6 @@
       <div id="checkin-result"></div>
       <div class="provider-grid" id="provider-grid"></div>
 
-      <div id="vendor-panel" style="display:none;margin-top:26px">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-          <button class="ghost small" onclick="closeVendor()">← 全部厂商</button>
-          <h3 class="section" style="margin:0;border:none;padding:0" id="vendor-title"></h3>
-          <span class="spacer" style="flex:1"></span>
-          <span class="hint" id="vendor-hint"></span>
-        </div>
-        <div id="vendor-accounts"></div>
-      </div>
     </section>
 
     <!-- ═══════════ 成员 ═══════════ -->
@@ -130,15 +160,19 @@
         <div>
           <div class="eyebrow">Members</div>
           <h2>成员</h2>
-          <p>点任意一行直接编辑。可用模型用标签点选，不必记模型 id。</p>
         </div>
-        <button class="primary" onclick="openMemberModal()">新增成员</button>
+        <div class="actions">
+          <button class="primary" onclick="openMemberModal()">新增成员</button>
+        </div>
       </div>
       <div class="table-wrap">
-        <table class="member-table">
+        <table class="member-table stack">
+          <colgroup>
+            <col class="m-c-who"><col class="m-c-tier"><col class="m-c-today">
+            <col class="m-c-total"><col class="m-c-models"><col class="m-c-acts">
+          </colgroup>
           <thead><tr>
-            <th>成员</th><th>今日 / 上限</th><th>本周 / 上限</th>
-            <th>请求 · 成功率</th><th>Token</th><th>积分</th>
+            <th>成员</th><th>档位</th><th>今日</th><th>总计</th>
             <th>可用模型</th><th>操作</th>
           </tr></thead>
           <tbody id="member-body"></tbody>
@@ -152,9 +186,11 @@
         <div>
           <div class="eyebrow">Analytics</div>
           <h2>数据</h2>
-          <p>请求量、Token 与积分的分布，用来判断额度分配和模型选择。</p>
+          <p>请求量、Token 与成本的分布，用来判断额度分配和模型选择。</p>
         </div>
-        <button class="ghost small" onclick="loadAnalytics(this, true)">刷新</button>
+        <div class="actions">
+          <button class="ghost small" onclick="loadAnalytics(this, true)">刷新</button>
+        </div>
       </div>
 
       <div class="kpi-grid" id="an-kpi"></div>
@@ -200,98 +236,158 @@
 
       <div class="grid2">
         <div class="chart-card">
-          <div class="chart-head"><span class="t">按厂商积分</span></div>
+          <div class="chart-head"><span class="t">按厂商成本</span></div>
           <div id="an-provider"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><span class="t">按成员积分 · 近 7 天</span></div>
+          <div class="chart-head"><span class="t">按成员成本 · 近 7 天</span></div>
           <div id="an-members"></div>
         </div>
       </div>
 
       <div class="chart-card">
         <div class="chart-head"><span class="t">按模型明细</span></div>
-        <div class="table-wrap"><table id="an-models"></table></div>
+        <div class="table-wrap"><table id="an-models" class="stack"></table></div>
       </div>
 
       <div class="chart-card">
         <div class="chart-head"><span class="t">按账号明细</span></div>
-        <div class="table-wrap"><table id="an-accounts"></table></div>
-      </div>
-    </section>
-
-    <!-- ═══════════ 接入 ═══════════ -->
-    <section class="page" id="page-settings">
-      <div class="page-head">
-        <div>
-          <div class="eyebrow">Integration</div>
-          <h2>接入</h2>
-          <p>把地址和密钥发给成员，在任意 OpenAI 兼容客户端里填这两项即可。</p>
-        </div>
-      </div>
-
-      <div class="grid-wide-left">
-        <div class="card gold-edge">
-          <h3 class="section">OpenAI 兼容端点</h3>
-          <div class="keybox" id="base-url">—</div>
-          <div class="hint">请求头 <span class="mono">Authorization: Bearer &lt;密钥&gt;</span>，
-            密钥在成员页生成。</div>
-          <h3 class="section" style="margin-top:20px">调用示例</h3>
-          <div class="keybox" id="curl-example" style="white-space:pre-wrap"></div>
-        </div>
-        <div class="card">
-          <h3 class="section">可用模型</h3>
-          <div id="model-list" class="hint">正在读取…</div>
-        </div>
+        <div class="table-wrap"><table id="an-accounts" class="stack"></table></div>
       </div>
 
       <div class="chart-card">
-        <div class="chart-head"><span class="t">最近调用</span></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>时间</th><th>成员</th><th>模型</th><th class="num">积分</th>
+        <div class="chart-head">
+          <span class="t">最近调用</span>
+          <span class="spacer"></span>
+          <span class="s" id="recent-meta"></span>
+        </div>
+        <div class="table-wrap table-scroll">
+          <table class="stack">
+            <thead><tr><th>时间</th><th>成员</th><th>模型</th><th class="num">成本</th>
               <th class="num">Token</th><th>结果</th><th>来源</th></tr></thead>
             <tbody id="recent-body"></tbody>
           </table>
         </div>
+        <div class="pager" id="recent-pager"></div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 定价 ═══════════ -->
+    <section class="page" id="page-pricing">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Pricing</div>
+          <h2>定价</h2>
+          <p>单价是每 100 万 token 的人民币价格，数字取自各家官方中文定价页。
+            成员的额度按这里的单价折算，所以改价会直接改变同一个请求算多少钱。</p>
+        </div>
+        <div class="actions">
+          <button class="ghost small" onclick="loadPricing(this)">刷新</button>
+          <button class="primary" onclick="savePricing(this)">保存改动</button>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="t">模型单价</span>
+          <span class="spacer"></span>
+          <span class="s" id="pricing-note"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="pricing-table" class="stack"></table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="section">已下架的模型</h3>
+        <p class="hint" style="margin:0 0 10px">
+          这些模型即使上游还能调也不再对外提供：同族已有新版，留着只会让人选错。
+          它们不在模型目录里出现，客户端拿旧名字请求会收到
+          <span class="mono">410 model_retired</span>。
+          历史明细不受影响，仍按当时那次的价目保留。
+          要恢复某个模型，从 <span class="mono">src/pricing.py</span> 的
+          <span class="mono">RETIRED</span> 里删掉那一行即可。
+        </p>
+        <p class="hint mono" id="pricing-retired" style="margin:0">—</p>
+      </div>
+
+      <div class="card">
+        <h3 class="section">内置参考价</h3>
+        <p class="hint" style="margin:0 0 10px">
+          数字取自各家官方中文定价页（2026-10）：DeepSeek、智谱、Moonshot、
+          MiniMax、阿里百炼、小米 MiMo、腾讯混元、阶跃星辰，单位是元/百万 tokens。
+          官方按输入长度分档的模型取最低档。查不到价的模型按默认价
+          <span class="mono" id="pricing-default"></span> 估算，表格里会标出来。
+        </p>
+        <div class="table-wrap"><table id="pricing-builtin" class="stack"></table></div>
       </div>
     </section>
 
   </main>
+
+  <footer class="panel-foot">
+    <span>© <span id="year">2026</span> Prometheus Lab · 管理后台</span>
+    <span>
+      <a href="/">站点首页</a> ·
+      <a href="/data">公开数据</a> ·
+      <a href="/docs">Docs</a>
+    </span>
+  </footer>
 </div>
 
 <!-- ───────── 成员编辑 ───────── -->
 <div class="modal-mask" id="member-modal">
   <div class="modal">
+    <div class="modal-scroll">
     <h3 id="member-modal-title">新增成员</h3>
     <input type="hidden" id="m-id">
+    <div class="field">
+      <label>档位</label>
+      <div class="chip-row" id="m-tiers"></div>
+      <div class="hint" id="m-tier-hint">档位决定每日与每周额度。</div>
+    </div>
     <div class="grid2">
       <div class="field"><label>名字</label><input id="m-name" placeholder="张三"></div>
       <div class="field"><label>邮箱（可选）</label><input id="m-email" placeholder="zhang@example.com"></div>
     </div>
     <div class="grid2">
       <div class="field"><label>登录账号</label><input id="m-username" placeholder="zhangsan"></div>
-      <div class="field"><label>登录密码</label><input id="m-password" type="password" placeholder="不填则不修改"></div>
-    </div>
-    <div class="grid2">
-      <div class="field"><label>每日积分上限</label><input id="m-daily" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
-      <div class="field"><label>每周积分上限</label><input id="m-weekly" type="number" step="0.1" min="0" placeholder="0 表示不限"></div>
+      <div class="field">
+        <label>登录密码</label>
+        <div id="m-pw-box" style="display:flex;gap:8px;align-items:center">
+          <button type="button" class="small ghost" id="m-pw-reset">重置为 123456</button>
+        </div>
+      </div>
     </div>
     <div class="field">
       <label>优先账号（软绑定，超额会回退到账号池）</label>
       <select id="m-account"></select>
     </div>
     <div class="field">
-      <label>可用模型 · 点选</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-        <button class="chip" data-preset="all">全选</button>
-        <button class="chip" data-preset="flash">仅 Flash 档</button>
+      <label>可用模型 · 先选厂商再点选</label>
+      <div class="chip-row" id="m-vendors"></div>
+      <div class="chip-row" style="margin:8px 0">
+        <button class="chip" data-preset="all">全选本厂商</button>
         <button class="chip" data-preset="none">清空（不限）</button>
       </div>
       <div class="chip-picker" id="m-models"></div>
       <div class="hint" id="m-models-hint">一个都不选表示不限制模型。</div>
+      <div class="hint" style="margin-top:6px">
+        同一个模型有多家厂商能跑时，在各自的厂商页里勾选。都勾上＝优先账号先试，
+        连不上自动换另一家；只勾一家＝只用那一家的账号。</div>
+    </div>
+    <div class="field">
+      <label>按模型的额度（元）· 日与周各自独立</label>
+      <div class="hint" style="margin-bottom:8px">
+        每个窗口默认跟随档位。只填日限额就只改日限额，周限额照旧跟档位；
+        填了数字之后，这个模型自己的百分比到 100% 就只停它，其它模型照常。
+        改额度不影响已经发生的历史用量。
+      </div>
+      <div id="m-base" class="hint" style="margin-bottom:8px;display:none"></div>
+      <div id="m-limits" style="max-height:260px;overflow:auto"></div>
     </div>
     <div class="field"><label>备注</label><input id="m-note" placeholder="可选"></div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal('member-modal')">取消</button>
       <button class="primary" onclick="saveMember(this)">保存</button>
@@ -302,6 +398,7 @@
 <!-- ───────── 接入账号 ───────── -->
 <div class="modal-mask" id="account-modal">
   <div class="modal">
+    <div class="modal-scroll">
     <h3>接入账号</h3>
     <div class="field">
       <label>来源厂商</label>
@@ -319,6 +416,7 @@
       <div class="hint" id="a-cred-hint"></div>
     </div>
     <div class="note" id="a-provider-note" style="display:none"></div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal('account-modal')">取消</button>
       <button class="primary" onclick="addAccount(this)">校验并接入</button>
@@ -329,6 +427,7 @@
 <!-- ───────── 导入账号文件 ───────── -->
 <div class="modal-mask" id="import-modal">
   <div class="modal">
+    <div class="modal-scroll">
     <h3>导入账号文件</h3>
     <p class="hint" style="margin-top:-4px">
       直接选官方导出的文件，不用改内容也不用合并。一次可以选多个。
@@ -343,6 +442,7 @@
       <div class="hint" id="i-hint"></div>
     </div>
     <div id="i-result"></div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeModal('import-modal')">关闭</button>
       <button class="primary" onclick="importFiles(this)">导入</button>
@@ -350,53 +450,99 @@
   </div>
 </div>
 
-<!-- ───────── 生成密钥 ───────── -->
-<div class="modal-mask" id="key-modal">
-  <div class="modal">
-    <h3>生成密钥</h3>
-    <input type="hidden" id="k-member">
-    <div class="field"><label>所属成员</label><div id="k-member-name" class="mono"></div></div>
-    <div class="field">
-      <label>IP 白名单（可空）</label>
-      <input id="k-ip" placeholder="例如 10.0.0.0/8, 203.0.113.7">
-    </div>
-    <div class="field"><label>备注</label><input id="k-note" placeholder="可选"></div>
-    <div id="k-result"></div>
-    <div class="modal-actions">
-      <button onclick="closeModal('key-modal')">关闭</button>
-      <button class="primary" onclick="createKey(this)">生成</button>
-    </div>
-  </div>
-</div>
-
 <script type="module">
 import {
-  initTheme, api, toast, esc, fmtInt, fmtCompact,
+  api, toast, esc, fmtInt, fmtCompact, fmtMoney,
   lineChart, barChart, stackedArea, ringChart, hbarList,
   histogram, heatmap, sparkline, countUp,
 } from '/assets/charts.js';
+import { mountBackdrop } from '/assets/backdrop.js';
+import { initWordmarkScroll } from '/assets/wordmark.js';
+import { initMobileNav } from '/assets/nav-mobile.js';
+import '/assets/theme-toggle.js';
 
-initTheme();
+mountBackdrop();
+initWordmarkScroll(document.querySelector('.wordmark'));
+initMobileNav();
 
 let STATUS = null, ACCOUNTS = [], MEMBERS = [], MODELS = [], PROVIDERS = [];
-let ANALYSIS = null, OPEN_VENDOR = null;
-const modelById = id => MODELS.find(m => m.id === id) || { id, name: id, provider: 'qoder' };
+// 档位定义来自 /api/public/plans（不需要登录，与套餐页同一份），
+// 成员弹窗的档位选择器、成员列表的档位标签都读这一份。
+let PLANS = [];
+// 管理员点过「重置密码」时置 true：保存成员时把密码重置回 123456。
+// 管理员不能输入自定义密码，只能重置，所以这是个开关不是输入框。
+let RESET_PW_PENDING = false;
+let ANALYSIS = null;
+const modelById = id => {
+  // 白名单里可能存的是来源写法 qoder:dfmodel，或旧数据的裸上游 key
+  const bare = String(id || '').split(':').pop();
+  return MODELS.find(m => m.id === id)
+    || MODELS.find(m => (m.upstream_keys || []).includes(bare))
+    || MODELS.find(m => (m.sources || []).some(s => s.spec === id))
+    || { id, name: id, provider: 'qoder' };
+};
 const provColor = slug => (PROVIDERS.find(p => p.slug === slug) || {}).color || 'var(--gold)';
 const provLabel = slug => (PROVIDERS.find(p => p.slug === slug) || {}).label || slug;
 
+// 成员列表的「可用模型」格：一个模型一个标签，标出它开了哪几家来源。
+// 白名单存的是 qoder:dfmodel 这种写法，同一模型的多个来源要合成一个标签。
+function allowlistCell(chips) {
+  const byModel = new Map();
+  chips.forEach(spec => {
+    const bare = String(spec).split(':').pop();
+    const prov = String(spec).includes(':') ? String(spec).split(':')[0] : '';
+    const m = modelById(spec);
+    const row = byModel.get(m.id) || { name: m.name || m.id, provs: [] };
+    if (prov) row.provs.push(prov);
+    else if (m.id === spec || (m.upstream_keys || []).includes(bare)) {
+      // 旧数据没写厂商，按目录补上；补不到就不标
+      const hit = (m.sources || []).find(s => s.upstream_key === bare);
+      if (hit) row.provs.push(hit.provider);
+    }
+    byModel.set(m.id, row);
+  });
+  const rows = [...byModel.values()];
+  // 每个标签自带厂商后缀，宽度常在 140–270px，这一列只有 280px 上下，
+  // 平铺的话一个标签一行，行高会被抬到 166px。只摆前 3 个，
+  // 剩下的收进 +N，鼠标移上去用 title 列出全名。
+  const SHOW = 3;
+  const head = rows.slice(0, SHOW).map(r => {
+    const tag = r.provs.length
+      ? `<span class="chip-prov">${esc([...new Set(r.provs)].map(provLabel).join('/'))}</span>`
+      : '';
+    return `<span class="pill" title="${esc(r.name)}">${esc(r.name)}${tag}</span>`;
+  }).join('');
+  if (rows.length <= SHOW) return head;
+  const rest = rows.slice(SHOW).map(r => r.name);
+  return head + `<span class="pill off" title="${esc(rest.join('、'))}">+${rest.length}</span>`;
+}
+
 /* ───────── 导航 ───────── */
 function show(page) {
-  document.querySelectorAll('#nav a').forEach(a =>
+  document.querySelectorAll('#nav a, #nav-mobile-menu a').forEach(a =>
     a.classList.toggle('active', a.dataset.page === page));
   document.querySelectorAll('.page').forEach(p =>
     p.classList.toggle('active', p.id === 'page-' + page));
   location.hash = page;
   if (page === 'analytics') loadAnalytics();
-  if (page === 'settings') loadSettings();
+  if (page === 'pricing') loadPricing();
   if (page === 'accounts') loadAccounts();
 }
-document.querySelectorAll('#nav a').forEach(a =>
+document.querySelectorAll('#nav a, #nav-mobile-menu a').forEach(a =>
   a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); }));
+
+/* 移动端抽屉菜单：展开/收起、图标换形、点链接自动收起都在
+   /assets/nav-mobile.js 里，后台与控制台共用同一份。 */
+
+const yearEl = document.getElementById('year');
+if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+document.getElementById('logout').addEventListener('click', async e => {
+  // 退出登录是 <a href="#">，不拦的话会先跳到页首再跳登录页
+  e.preventDefault();
+  try { await api('/api/logout', { method: 'POST' }); } catch { /* 清 cookie 失败也跳走 */ }
+  location.href = '/login';
+});
 
 window.openModal = id => document.getElementById(id).classList.add('open');
 window.closeModal = id => document.getElementById(id).classList.remove('open');
@@ -422,14 +568,14 @@ async function loadOverview() {
 
     document.getElementById('ov-kpi').innerHTML =
       kid('账号额度余量',
-          `<span data-count="${STATUS.credits_remaining}" data-dec="1">0</span><small>积分</small>`,
+          `<span data-count="${STATUS.credits_remaining}" data-dec="1">0</span><small>上游积分</small>`,
           `总额 ${fmtCompact(STATUS.credits_total)} · 已用 ${fmtCompact(STATUS.credits_used)}`) +
       kid('可用账号', `<span data-count="${STATUS.available}" data-dec="0">0</span><small>/ ${STATUS.accounts}</small>`,
           `${stats.filter(s => s.accounts > 0).length} 家厂商在跑`) +
       kid('成员', `<span data-count="${STATUS.members}" data-dec="0">0</span><small>人</small>`,
           `${STATUS.keys} 个密钥`) +
       kid('今日请求', `<span data-count="${t.requests || 0}" data-dec="0">0</span>`,
-          `消耗 ${fmtCompact(t.credits || 0)} 积分`) +
+          `成本 ${fmtMoney(t.cost || 0)}`) +
       kid('今日 Token', `<span data-count="${t.tokens || 0}" data-dec="0">0</span>`,
           `成功率 ${t.success_rate == null ? '—' : t.success_rate.toFixed(1) + '%'}`) +
       kid('累计请求', `<span data-count="${a.requests || 0}" data-dec="0">0</span>`,
@@ -443,7 +589,7 @@ async function loadOverview() {
     const ringWrap = document.getElementById('ov-ring');
     ringWrap.innerHTML = `<div id="ring-slot"></div>
       <div style="flex:1;min-width:150px">
-        <div class="stat"><div class="num-big">${fmtCompact(STATUS.credits_remaining)}<small>积分</small></div>
+        <div class="stat"><div class="num-big">${fmtCompact(STATUS.credits_remaining)}<small>上游积分</small></div>
           <div class="lbl">全部账号剩余</div></div>
         <div class="hint" style="margin-top:10px">已用 ${fmtCompact(STATUS.credits_used)} /
           总额 ${fmtCompact(STATUS.credits_total)}</div>
@@ -461,30 +607,30 @@ async function loadOverview() {
       labels: a.daily.map(d => d.date),
       series: [
         { name: '请求', color: 'var(--gold)', values: a.daily.map(d => d.requests) },
-        { name: '积分', color: 'var(--bronze)', values: a.daily.map(d => d.credits) },
+        { name: '成本', color: 'var(--bronze)', values: a.daily.map(d => d.cost) },
       ],
       area: true, height: 210, yFmt: fmtCompact,
     });
     hbarList(document.getElementById('ov-provider'), {
       rows: (a.by_provider || []).map(p => ({
-        label: p.label, value: p.credits, color: p.color,
+        label: p.label, value: p.cost, color: p.color,
       })),
-      fmt: v => v.toFixed(3), unit: ' 积分',
+      fmt: fmtMoney, unit: '',
     });
     document.getElementById('ov-members').innerHTML = '';
     const memberRows = (a.by_member || []).slice(0, 6).map(m => ({
-      label: m.name, value: m.credits, color: 'var(--gold)',
+      label: m.name, value: m.cost, color: 'var(--gold)',
     }));
     hbarList(document.getElementById('ov-members'), {
-      rows: memberRows, fmt: v => v.toFixed(3), unit: ' 积分',
+      rows: memberRows, fmt: fmtMoney, unit: '',
     });
     renderTable(document.getElementById('ov-models'), a.by_model, [
       { label: '模型', fmt: r => modelCell(r.id, r.model) },
-      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
-      { label: '失败', cls: 'num', fmt: r => fmtInt(r.errors) },
-      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r => fmtInt(r.tokens) },
-      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
+      { label: '请求量', cls: 'num', dl: '请求量', fmt: r => fmtInt(r.requests) },
+      { label: '失败', cls: 'num', dl: '失败', fmt: r => fmtInt(r.errors) },
+      { label: '成功率', cls: 'num', dl: '成功率', fmt: r => pctCell(r.success_rate) },
+      { label: 'Token', cls: 'num', dl: 'Token', fmt: r => fmtInt(r.tokens) },
+      { label: '成本', cls: 'num', dl: '成本', fmt: r => fmtMoney(r.cost) },
     ], '还没有调用记录');
     document.getElementById('ov-model-note').textContent =
       `共 ${(a.by_model || []).length} 个模型被调用过`;
@@ -505,7 +651,6 @@ async function loadAccounts() {
     PROVIDERS = d.providers || PROVIDERS;
     try { STATUS = await api('/api/status'); } catch { /* 概览失败不阻塞 */ }
     renderProviderCards();
-    if (OPEN_VENDOR) renderVendor(OPEN_VENDOR);
   } catch (e) {
     document.getElementById('provider-grid').innerHTML =
       `<div class="empty">${esc(e.message)}</div>`;
@@ -534,7 +679,7 @@ function renderProviderCards() {
                   : `<span class="pill ok"><span class="dot"></span>${st.available_accounts}</span>`}
       </div>
       <div class="pc-nums">
-        <div><div class="pc-num">${fmtCompact(st.credits_remaining)}<small>积分</small></div>
+        <div><div class="pc-num">${fmtCompact(st.credits_remaining)}<small>上游积分</small></div>
           <div class="pc-lbl">剩余</div></div>
         <div><div class="pc-num">${st.accounts}</div><div class="pc-lbl">账号</div></div>
       </div>
@@ -551,89 +696,12 @@ function renderProviderCards() {
     .forEach(d => { d.style.width = d.dataset.w + '%'; }));
 
   grid.querySelectorAll('.provider-card').forEach(card => {
-    const go = () => openVendor(card.dataset.slug);
+    // 厂商账号列表独立成页：手机上一屏放不下展开的面板，
+    // 跳转后还能用后退回到厂商总览
+    const go = () => { location.href = '/accounts/vendor/' + card.dataset.slug; };
     card.addEventListener('click', go);
     card.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   });
-}
-
-function openVendor(slug) {
-  OPEN_VENDOR = slug;
-  renderVendor(slug);
-  document.getElementById('vendor-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-window.closeVendor = () => {
-  OPEN_VENDOR = null;
-  document.getElementById('vendor-panel').style.display = 'none';
-};
-
-function renderVendor(slug) {
-  const prov = PROVIDERS.find(p => p.slug === slug) || { label: slug, color: 'var(--gold)' };
-  const rows = ACCOUNTS.filter(a => a.provider === slug);
-  const panel = document.getElementById('vendor-panel');
-  panel.style.display = '';
-  document.getElementById('vendor-title').innerHTML =
-    `<span style="color:${prov.color}">${esc(prov.label)}</span> · ${rows.length} 个账号`;
-  const pending = rows.length === 0 && !prov.available;
-  const pendingCheckin = rows.filter(a => a.supports_checkin && !a.checkin_at).length;
-  document.getElementById('vendor-hint').textContent = pending
-    ? '这一家的协议还没接入，接入后这里会出现账号列表'
-    : pendingCheckin ? `${pendingCheckin} 个账号今天还没签到`
-    : rows.length ? '' : '还没有账号，点右上角「接入账号」添加';
-
-  if (!rows.length) {
-    document.getElementById('vendor-accounts').innerHTML = `<div class="card">
-      <div class="empty">${esc(prov.label)} 还没有账号</div>
-      ${!prov.available ? `<div class="note">${esc(prov.label)} 的适配器还没有实现。
-        账号表、接口和界面都已经按厂商分开，补上 <span class="mono">src/providers.py</span>
-        里对应的适配器就能接入。</div>` : ''}
-    </div>`;
-    return;
-  }
-
-  document.getElementById('vendor-accounts').innerHTML = rows.map(a => {
-    const pct = a.credits_total > 0
-      ? Math.min(100, (a.credits_remaining / a.credits_total) * 100) : 0;
-    const state = !a.enabled ? '<span class="pill off">停用</span>'
-      : a.cooldown > 0 ? `<span class="pill warn">冷却 ${a.cooldown}s</span>`
-      : '<span class="pill ok"><span class="dot"></span>可用</span>';
-    const expire = a.credits_expire_at
-      ? new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN') : '不过期';
-    // 有些厂商没有邮箱（WorkBuddy 导出的就是昵称），空片段不要留出多余的分隔点
-    const meta = [a.email, a.region_label, a.uid ? 'UID ' + String(a.uid).slice(0, 8) : '']
-      .filter(Boolean).map(esc).join(' · ');
-    return `<div class="account-row" style="grid-template-columns:1.5fr 1.1fr 1fr auto">
-      <div>
-        <div class="an">${esc(a.name || a.email || a.uid)}</div>
-        <div class="as">${meta}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
-        <div class="as">${a.bound_members.length ? '绑定 ' + a.bound_members.map(esc).join('、') : '未绑定成员'}</div>
-      </div>
-      <div>
-        <div class="mono" style="font-size:12px">${a.credits_remaining.toFixed(1)}
-          <span style="color:var(--ink-faint)">/ ${a.credits_total.toFixed(0)}</span></div>
-        <div class="progress ${pct <= 10 ? 'err' : pct <= 30 ? 'warn' : ''}" style="margin-top:5px">
-          <div data-w="${pct.toFixed(1)}"></div>
-        </div>
-        <div class="as" style="margin-top:5px">已用 ${a.credits_used.toFixed(1)} · ${expire}</div>
-      </div>
-      <div>
-        <div style="font-size:12.5px">${fmtInt(a.requests)} 次 · ${pctCell(a.success_rate)}</div>
-        <div class="as">${fmtCompact(a.tokens)} Token · ${a.gateway_consumed.toFixed(3)} 积分</div>
-        ${a.supports_checkin ? `<div class="as">${
-          a.checkin_at ? '签到 ' + (a.checkin_ok ? '✓ ' + esc(a.checkin_message || '已签到')
-            : '✕ ' + esc(a.checkin_message || '失败')) : '今天还没签到'}</div>` : ''}
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        ${state}
-        <a class="btn small" href="/accounts/${a.id}">详情</a>
-        ${a.supports_checkin ? `<button class="small ghost" onclick="checkinOne(${a.id}, this)">签到</button>` : ''}
-        <button class="small ghost" onclick="accAction(${a.id},'${a.enabled ? 'disable' : 'enable'}')">${a.enabled ? '停用' : '启用'}</button>
-        <button class="small ghost" onclick="delAccount(${a.id})">移除</button>
-      </div>
-    </div>`;
-  }).join('');
-  requestAnimationFrame(() => document.querySelectorAll('#vendor-accounts .progress > div[data-w]')
-    .forEach(d => { d.style.width = d.dataset.w + '%'; }));
 }
 
 window.accAction = async (id, action) => {
@@ -857,43 +925,44 @@ async function loadMembers() {
     MEMBERS = m.members || [];
     ACCOUNTS = a.accounts || [];
     if (!MEMBERS.length) {
-      body.innerHTML = '<tr><td colspan="8" class="empty">还没有成员，先新增一个</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="empty">还没有成员，先新增一个</td></tr>';
       return;
     }
     body.innerHTML = MEMBERS.map(m => {
-      const dPct = m.limit_daily > 0 ? Math.min(100, (m.used_today / m.limit_daily) * 100) : 0;
-      const wPct = m.limit_weekly > 0 ? Math.min(100, (m.used_week / m.limit_weekly) * 100) : 0;
+      const dPct = m.pct_today == null ? 0 : m.pct_today;
+      const tPct = m.pct_total == null ? 0 : m.pct_total;
       const cls = p => p >= 95 ? 'progress err' : p >= 70 ? 'progress warn' : 'progress';
       const chips = (m.model_allowlist || '').split(',').map(s => s.trim()).filter(Boolean);
       return `<tr data-mid="${m.id}" style="cursor:pointer">
-        <td data-label="成员" style="max-width:200px;white-space:normal">
-          <strong class="serif" style="font-size:15.5px">${esc(m.name)}</strong>
-          ${m.is_admin ? '<span class="pill gold">管理员</span>' : ''}
-          ${m.enabled ? '' : '<span class="pill off">停用</span>'}
+        <td data-label="成员" class="m-who">
+          <div class="m-name">
+            <strong class="serif">${esc(m.name)}</strong>
+            ${m.is_admin ? '<span class="pill gold">管理员</span>' : ''}
+            ${m.enabled ? '' : '<span class="pill off">停用</span>'}
+          </div>
           <div class="sub">${m.username ? esc(m.username) : '未设登录账号'}${m.email ? ' · ' + esc(m.email) : ''}</div>
           <div class="sub">${m.preferred_account ? '优先 ' + esc(m.preferred_account) : '共用账号池'}</div>
         </td>
-        <td data-label="今日 / 上限" class="mono" style="min-width:120px">${m.used_today.toFixed(2)} /
-          ${m.limit_daily > 0 ? m.limit_daily.toFixed(1) : '不限'}
+        <td data-label="档位"><span class="tier" data-tier="${esc(m.tier || 'plus')}">${esc((m.tier || 'plus').toUpperCase())}</span></td>
+        <td data-label="今日" class="mono quota-cell">
+          <div class="q-line">
+            <span class="q-pct">${m.limit_daily > 0 ? dPct.toFixed(0) + '%' : '不限'}</span>
+            <span class="cap">${fmtMoney(m.used_today)} / ${m.limit_daily > 0 ? fmtMoney(m.limit_daily) : '不限'}</span>
+          </div>
           ${m.limit_daily > 0 ? `<div class="${cls(dPct)}"><div data-w="${dPct.toFixed(1)}"></div></div>` : ''}</td>
-        <td data-label="本周 / 上限" class="mono" style="min-width:120px">${m.used_week.toFixed(2)} /
-          ${m.limit_weekly > 0 ? m.limit_weekly.toFixed(1) : '不限'}
-          ${m.limit_weekly > 0 ? `<div class="${cls(wPct)}"><div data-w="${wPct.toFixed(1)}"></div></div>` : ''}</td>
-        <td data-label="请求 · 成功率" class="num">${fmtInt(m.requests)}<div class="sub">${pctCell(m.success_rate)}</div></td>
-        <td data-label="Token" class="num">${fmtCompact(m.tokens)}</td>
-        <td data-label="积分" class="num">${m.used_total.toFixed(3)}</td>
-        <td data-label="可用模型" style="white-space:normal;max-width:230px">
-          ${chips.length ? chips.slice(0, 6).map(c =>
-            `<span class="pill" style="margin:0 3px 3px 0">${esc(modelById(c).name)}</span>`).join('')
-            + (chips.length > 6 ? `<span class="pill off">+${chips.length - 6}</span>` : '')
-            : '<span class="hint">不限</span>'}
+        <td data-label="总计" class="mono quota-cell">
+          <div class="q-line">
+            <span class="q-pct">${m.limit_total > 0 ? tPct.toFixed(0) + '%' : '不限'}</span>
+            <span class="cap">${fmtMoney(m.used_total)} / ${m.limit_total > 0 ? fmtMoney(m.limit_total) : '不限'}</span>
+          </div>
+          ${m.limit_total > 0 ? `<div class="${cls(tPct)}"><div data-w="${tPct.toFixed(1)}"></div></div>` : ''}</td>
+        <td data-label="可用模型" class="m-models">
+          <div class="chips">${chips.length ? allowlistCell(chips) : '<span class="hint">不限</span>'}</div>
         </td>
-        <td data-label="操作">
-          <div style="display:flex;gap:5px;flex-wrap:wrap">
-            <button class="small" data-act="edit">编辑</button>
-            <button class="small ghost" data-act="key">密钥</button>
-            <button class="small ghost" data-act="toggle">${m.enabled ? '停用' : '启用'}</button>
-            <button class="small ghost" data-act="del">删除</button>
+        <td data-label="操作" class="m-acts">
+          <div class="row-acts">
+            <button class="small" data-act="detail">详情</button>
+            <button class="small ghost" data-act="edit">编辑</button>
           </div>
         </td>
       </tr>`;
@@ -906,63 +975,281 @@ async function loadMembers() {
       const id = Number(tr.dataset.mid);
       tr.addEventListener('click', e => {
         const act = e.target.closest('[data-act]');
-        if (!act) { editMember(id); return; }
+        // 点行本身（不是按钮）就是看详情，比在操作列里再找一个按钮快
+        if (!act || act.dataset.act === 'detail') {
+          location.href = '/members/' + id;
+          return;
+        }
         e.stopPropagation();
         if (act.dataset.act === 'edit') editMember(id);
-        if (act.dataset.act === 'key') {
-          const m = MEMBERS.find(x => x.id === id);
-          openKeyModal(id, m ? m.name : '');
-        }
-        if (act.dataset.act === 'toggle') toggleMember(id);
-        if (act.dataset.act === 'del') delMember(id);
       });
     });
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="8" class="empty">${esc(e.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
   }
 }
 
-/* 模型标签选择器 */
+/* 模型标签选择器
+   模型对使用者只有一个名字，但后台需要看清它能落到哪几家厂商的账号池。
+   同一个模型可能好几家都能跑（如 DeepSeek 既有 Qoder 的 dfmodel，又有
+   WorkBuddy 的 deepseek-v4.1-flash），若平铺成一个长列表很难找。
+   所以先选厂商，再在该厂商的模型里点选；勾选值仍是 `厂商:上游key`。 */
 let pickedModels = new Set();
+let activeVendor = null;
+
+// 一个来源的 spec；老目录没有 sources 时退回模型 id
+const srcSpec = (m, s) => s.spec || m.id;
+const modelSrcs = m => m.sources || [{ spec: m.id, provider: m.provider }];
+
+// 目录里出现过的厂商，按 PROVIDERS 的顺序排，保证标签位置稳定
+function vendorSlugs() {
+  const seen = new Set();
+  MODELS.forEach(m => modelSrcs(m).forEach(s => {
+    if (s.provider || m.provider) seen.add(s.provider || m.provider);
+  }));
+  const ordered = PROVIDERS.map(p => p.slug).filter(slug => seen.has(slug));
+  return [...ordered, ...[...seen].filter(s => !ordered.includes(s))];
+}
+
+// 这个厂商下能选的来源数、已勾数，用于在标签上显示进度
+function vendorCounts(slug) {
+  let total = 0, on = 0;
+  MODELS.forEach(m => modelSrcs(m).forEach(s => {
+    if ((s.provider || m.provider) !== slug) return;
+    total += 1;
+    if (pickedModels.has(srcSpec(m, s))) on += 1;
+  }));
+  return { total, on };
+}
+
+function renderVendorTabs() {
+  const box = document.getElementById('m-vendors');
+  const slugs = vendorSlugs();
+  if (!slugs.length) { box.innerHTML = ''; return; }
+  if (!slugs.includes(activeVendor)) activeVendor = slugs[0];
+  box.innerHTML = slugs.map(slug => {
+    const { total, on } = vendorCounts(slug);
+    return `<button type="button" class="chip ${slug === activeVendor ? 'on' : ''}"
+        data-vendor="${esc(slug)}">
+      ${esc(provLabel(slug))}
+      <span class="chip-prov">${on}/${total}</span></button>`;
+  }).join('');
+  box.querySelectorAll('[data-vendor]').forEach(b => b.addEventListener('click', () => {
+    activeVendor = b.dataset.vendor;
+    renderModelChips();
+  }));
+}
 
 function renderModelChips() {
+  renderVendorTabs();
   const box = document.getElementById('m-models');
-  // 已选但不在目录里的 id 也要显示出来，否则读取失败时看不到原有配置
-  const known = new Set(MODELS.map(m => m.id));
-  const extra = [...pickedModels].filter(id => !known.has(id))
-    .map(id => ({ id, name: id, provider: '' }));
-  const list = [...MODELS, ...extra];
-  if (!list.length) {
+  const known = new Set();
+  MODELS.forEach(m => modelSrcs(m).forEach(s => known.add(srcSpec(m, s))));
+  // 已选但不在目录里的写法（老数据 dfmodel、或目录暂时读不到）也要显示出来
+  const extras = [...pickedModels].filter(v => !known.has(v));
+  // 只看当前厂商的来源；一个模型在这家有多条来源时都列出来
+  const rows = MODELS.map(m => {
+    const srcs = modelSrcs(m).filter(s =>
+      (s.provider || m.provider) === activeVendor);
+    if (!srcs.length) return '';
+    const chips = srcs.map(s => {
+      const spec = srcSpec(m, s);
+      const on = pickedModels.has(spec);
+      return `<button type="button" class="chip ${on ? 'on' : ''}"
+          data-spec="${esc(spec)}" title="${esc(spec)}">
+        <span class="tick">✓</span>${esc(s.upstream_key || spec)}
+        <span class="chip-prov">${esc(s.region || '')}</span></button>`;
+    }).join('');
+    return `<div class="model-src-row">
+      <div class="model-src-name">${esc(m.name)}</div>
+      <div class="model-src-chips">${chips}</div>
+    </div>`;
+  }).join('');
+  const extraRow = extras.length ? `<div class="model-src-row">
+      <div class="model-src-name">其他（旧写法）</div>
+      <div class="model-src-chips">${extras.map(v => `<button type="button"
+        class="chip on" data-spec="${esc(v)}" title="${esc(v)}">
+        <span class="tick">✓</span>${esc(v)}</button>`).join('')}</div>
+    </div>` : '';
+  if (!rows && !extraRow) {
     box.innerHTML = '<span class="hint">还没有读到模型目录，接入一个可用账号后刷新。</span>';
-    return;
+  } else {
+    box.innerHTML = rows + extraRow;
   }
-  box.innerHTML = list.map(m => `
-    <button type="button" class="chip ${pickedModels.has(m.id) ? 'on' : ''}" data-model="${esc(m.id)}">
-      <span class="tick">✓</span>${esc(m.name)}
-      ${m.provider ? `<span class="chip-prov">${esc(provLabel(m.provider))}</span>` : ''}
-    </button>`).join('');
-  box.querySelectorAll('[data-model]').forEach(b => b.addEventListener('click', () => {
-    const id = b.dataset.model;
-    if (pickedModels.has(id)) { pickedModels.delete(id); b.classList.remove('on'); }
-    else { pickedModels.add(id); b.classList.add('on'); }
-    updateModelHint();
+  box.querySelectorAll('[data-spec]').forEach(b => b.addEventListener('click', () => {
+    const spec = b.dataset.spec;
+    if (pickedModels.has(spec)) pickedModels.delete(spec);
+    else pickedModels.add(spec);
+    rerenderModelLimits(pickedTier);
+    renderModelChips();
   }));
   updateModelHint();
 }
 
+// 提示按厂商分别报进度，最后一行给总览
 function updateModelHint() {
+  const slugs = vendorSlugs();
+  const parts = slugs.map(slug => {
+    const { total, on } = vendorCounts(slug);
+    return on ? `${provLabel(slug)} ${on}/${total}` : `${provLabel(slug)} 未选`;
+  });
+  const other = [...pickedModels].filter(v => !MODELS.some(m =>
+    modelSrcs(m).some(s => srcSpec(m, s) === v))).length;
+  const models = MODELS.filter(m =>
+    modelSrcs(m).some(s => pickedModels.has(srcSpec(m, s)))).length;
   document.getElementById('m-models-hint').textContent = pickedModels.size
-    ? `已选 ${pickedModels.size} 个模型：${[...pickedModels].map(id => modelById(id).name).join('、')}`
-    : '一个都不选表示不限制模型。';
+    ? `已允许 ${models} 个模型（${pickedModels.size} 条来源）· ${parts.join(' / ')}`
+      + (other ? `，另有 ${other} 条旧写法` : '')
+    : '一个都不选表示不限制模型，任何账号池都能用。';
 }
 
+// 预设只作用于当前厂商：全选本厂商 / 清空全部
+// （厂商标签上的 0/N 进度已经能看出哪家还没选，不再单设仅 Flash 档）
 document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
   const p = b.dataset.preset;
-  if (p === 'all') pickedModels = new Set(MODELS.map(m => m.id));
-  else if (p === 'none') pickedModels = new Set();
-  else pickedModels = new Set(MODELS.filter(m => /flash/i.test(m.name)).map(m => m.id));
+  if (p === 'none') {
+    pickedModels = new Set();
+  } else if (p === 'all') {
+    MODELS.forEach(m => modelSrcs(m).forEach(s => {
+      if ((s.provider || m.provider) === activeVendor) pickedModels.add(srcSpec(m, s));
+    }));
+  }
+  rerenderModelLimits(pickedTier);
   renderModelChips();
 }));
+
+/* 按模型的额度编辑器。
+
+   日与周是两个独立的窗口：只填日限额时，周那个格子会提交 null，表示
+   「跟随档位」，绝不能把界面上显示的默认数字当成管理员设置过的值写回去
+   ——那样调整日限额会把周限额一起钉死在一个具体数字上。 */
+let modelLimits = {};       // {模型名: {daily, total}}，只含真正改过的窗口
+let modelLimitSaved = {};   // 打开弹窗时的快照，用来判断哪些模型被隐藏了
+// 这个成员实际的日 / 周额度基线。等于档位值时就是档位，被管理员手工
+// 覆盖过时是覆盖值（老数据里常见 15 / 100，而 plus 档本身是 15 / 75）。
+// 占位提示必须以此为准，否则界面写「周 75」而留空实际得到 100。
+let limitBase = null;       // {daily, total, manual: {daily, total}}
+
+function renderModelLimits(tier) {
+  const box = document.getElementById('m-limits');
+  const plan = (PLANS || []).find(p => p.slug === tier) || {};
+  // 占位提示写的是「留空会得到多少」：编辑已有成员时用它的真实基线，
+  // 新建成员时才用档位值。成员级手工覆盖过时两者会不一样。
+  const planDaily = limitBase ? Number(limitBase.daily || 0) : Number(plan.daily || 0);
+  const planTotal = limitBase ? Number(limitBase.total || 0) : Number(plan.weekly || 0);
+  // 只列这个成员能用的模型；一个都没选就是全都能用
+  const allowedNames = new Set(MODELS.filter(m =>
+    !pickedModels.size ||
+    modelSrcs(m).some(src => pickedModels.has(srcSpec(m, src)))
+  ).map(m => m.name));
+  const rows = MODELS.filter(m => allowedNames.has(m.name));
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint">还没有读到模型目录，接入一个可用账号后刷新。</div>';
+    return;
+  }
+  box.innerHTML = `<div class="limit-row limit-head">
+      <div class="limit-name">模型</div>
+      <div class="limit-col">日限额</div>
+      <div class="limit-col">周限额</div>
+    </div>` + rows.map(m => {
+    const cur = modelLimits[m.name] || {};
+    const over = cur.daily != null || cur.total != null;
+    // 留空表示跟随这个成员当前的额度基线（一般是档位，被手工覆盖过时
+    // 是覆盖值）。写「档位」在覆盖过的成员上会与上面的数字自相矛盾。
+    const mark = (v, planVal) => v != null
+      ? '<span class="limit-tag">已改</span>'
+      : `<span class="limit-tag muted">${planVal > 0 ? '跟随' : '不限'}</span>`;
+    return `<div class="limit-row" data-model="${esc(m.name)}">
+      <div class="limit-name">${esc(m.name)}${over
+        ? '<span class="pill warn" style="margin-left:6px">改</span>' : ''}</div>
+      <div class="limit-cell">
+        <input class="limit-in" data-window="daily" type="number" step="0.01" min="0"
+          inputmode="decimal" placeholder="${planDaily > 0 ? planDaily : '不限'}"
+          value="${cur.daily == null ? '' : cur.daily}">${mark(cur.daily, planDaily)}</div>
+      <div class="limit-cell">
+        <input class="limit-in" data-window="total" type="number" step="0.01" min="0"
+          inputmode="decimal" placeholder="${planTotal > 0 ? planTotal : '不限'}"
+          value="${cur.total == null ? '' : cur.total}">${mark(cur.total, planTotal)}</div>
+    </div>`;
+  }).join('');
+}
+
+// 成员级手工额度提示：老数据里 members 表存着 15 / 100（周额度 100 是
+// 积分时代的旧数字，plus 档现在是 15 / 75），它会盖掉档位、又被每个模型
+// 继承，管理员在界面上看不到就永远清不掉。有覆盖时才显示这一行。
+function renderBaseHint() {
+  const el = document.getElementById('m-base');
+  if (!el) return;
+  const manual = (limitBase && limitBase.manual) || {};
+  const day = Number(manual.daily || 0);
+  const week = Number(manual.total || 0);
+  if (!limitBase || (day <= 0 && week <= 0)) { el.style.display = 'none'; return; }
+  const plan = (PLANS || []).find(p => p.slug === pickedTier) || {};
+  const fmt = v => fmtMoney(Number(v || 0));
+  el.style.display = '';
+  el.innerHTML = `这个成员有手工设置的总量上限：
+    <b>日 ${fmt(limitBase.daily)} / 周 ${fmt(limitBase.total)}</b>
+    （${esc(pickedTier.toUpperCase())} 档是 ${fmt(plan.daily)} / ${fmt(plan.weekly)}）。
+    它盖掉档位、并被下面每个没单独设置的模型继承。
+    <button class="small ghost" id="m-base-reset" style="margin-left:6px">恢复按档位</button>`;
+  const btn = document.getElementById('m-base-reset');
+  if (btn) btn.onclick = () => resetMemberLimits(btn);
+}
+
+// 把成员级手工额度清零 = 回到档位。只改这个成员，动的是真金白银的额度，
+// 所以先确认。
+async function resetMemberLimits(btn) {
+  const id = document.getElementById('m-id').value;
+  if (!id) return;
+  const plan = (PLANS || []).find(p => p.slug === pickedTier) || {};
+  if (!confirm(`把这个成员的额度恢复到 ${pickedTier.toUpperCase()} 档`
+    + `（日 ${fmtMoney(plan.daily)} / 周 ${fmtMoney(plan.weekly)}）？`)) return;
+  btn.disabled = true;
+  try {
+    await api('/api/members/' + id, {
+      method: 'PATCH', body: JSON.stringify({ limit_daily: 0, limit_total: 0 }) });
+    limitBase = { daily: plan.daily, total: plan.weekly, manual: { daily: 0, total: 0 } };
+    renderBaseHint();
+    renderModelLimits(pickedTier);
+    toast('已恢复按档位');
+    loadMembers();
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false;
+  }
+}
+
+function collectModelLimits() {
+  const out = {};
+  const seen = new Set();
+  document.querySelectorAll('#m-limits .limit-row[data-model]').forEach(row => {
+    const name = row.dataset.model;
+    seen.add(name);
+    const cell = {};
+    let any = false;
+    row.querySelectorAll('.limit-in').forEach(inp => {
+      const v = inp.value.trim();
+      if (v === '') { cell[inp.dataset.window] = null; return; }
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return;
+      cell[inp.dataset.window] = n;
+      any = true;
+    });
+    if (any) out[name] = cell;
+  });
+  // 没渲染出来的模型（刚被取消勾选）保留原有额度：把模型加回来时
+  // 不该发现之前设的数字静默消失了
+  Object.entries(modelLimitSaved).forEach(([name, cell]) => {
+    if (!seen.has(name) && !out[name]) out[name] = cell;
+  });
+  return out;
+}
+
+// 把当前输入读进 modelLimits，再按新的档位重画（切档位、切厂商时用）
+function rerenderModelLimits(tier) {
+  modelLimits = collectModelLimits();
+  renderModelLimits(tier);
+}
 
 async function ensureModels() {
   if (MODELS.length) return;
@@ -978,14 +1265,96 @@ window.openMemberModal = async () => {
   await ensureModels();
   document.getElementById('member-modal-title').textContent = '新增成员';
   document.getElementById('m-id').value = '';
-  ['m-name', 'm-email', 'm-daily', 'm-weekly', 'm-note', 'm-username', 'm-password']
+  ['m-name', 'm-email', 'm-note', 'm-username']
     .forEach(id => { document.getElementById(id).value = ''; });
-  pickedModels = new Set(MODELS.filter(m => /flash/i.test(m.name)).map(m => m.id));
-  if (!pickedModels.size) pickedModels = new Set(MODELS.map(m => m.id));
+  // 默认不预选任何来源，一个都不选就是不限模型。要看具体限制什么时
+  // 再按厂商逐个勾选（厂商标签上会显示 已选/总数）。
+  pickedModels = new Set();
+  activeVendor = null;
+  modelLimits = {};
+  modelLimitSaved = {};
+  limitBase = null;
+  renderBaseHint();
   renderModelChips();
   fillAccountSelect(null);
+  await renderTierPicker('plus');
+  renderModelLimits('plus');
+  // 新建成员的服务端初始密码就是 123456，不需要重置开关
+  RESET_PW_PENDING = false;
+  syncPwResetUI(false);
   openModal('member-modal');
 };
+
+/* 档位选择器
+   四个档位只有额度不同，所以标签直接写「名字 · 每日额度」，
+   管理员不用记 go/plus/pro/max 分别对应多少钱。 */
+let pickedTier = 'plus';
+
+async function ensurePlans() {
+  if (PLANS.length) return PLANS;
+  try {
+    const r = await api('/api/public/plans');
+    PLANS = r.plans || [];
+  } catch { PLANS = []; }
+  return PLANS;
+}
+
+async function renderTierPicker(current) {
+  const box = document.getElementById('m-tiers');
+  if (!box) return;
+  const plans = await ensurePlans();
+  pickedTier = current || 'plus';
+  if (!plans.length) {
+    box.innerHTML = '<span class="hint">读不到档位定义，保存时按 Plus 计。</span>';
+    return;
+  }
+  if (!plans.some(p => p.slug === pickedTier)) pickedTier = plans[0].slug;
+  box.innerHTML = plans.map(p =>
+    `<button type="button" class="chip${p.slug === pickedTier ? ' on' : ''}"
+        data-tier-pick="${esc(p.slug)}">${esc(p.name)}
+        <span class="tier">${fmtMoney(p.daily)}/日</span></button>`).join('');
+  syncTierHint();
+}
+
+function syncTierHint() {
+  const hint = document.getElementById('m-tier-hint');
+  const p = PLANS.find(x => x.slug === pickedTier);
+  if (!hint) return;
+  hint.textContent = p
+    ? `档位决定额度：每日 ${fmtMoney(p.daily)}、每周 ${fmtMoney(p.weekly)}。`
+    : '档位决定每日与每周额度。';
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-tier-pick]');
+  if (!btn) return;
+  pickedTier = btn.dataset.tierPick;
+  document.querySelectorAll('[data-tier-pick]').forEach(b =>
+    b.classList.toggle('on', b.dataset.tierPick === pickedTier));
+  syncTierHint();
+  // 档位变了，模型额度的默认值跟着变，placeholder 要重画
+  rerenderModelLimits(pickedTier);
+});
+
+// 重置按钮只在「编辑已有成员」时出现：新建成员的密码本来就是 123456
+function syncPwResetUI(isEdit) {
+  const box = document.getElementById('m-pw-box');
+  if (!box) return;
+  const btn = document.getElementById('m-pw-reset');
+  box.style.visibility = isEdit ? 'visible' : 'hidden';
+  if (!btn) return;
+  btn.textContent = RESET_PW_PENDING ? '将重置为 123456（点此取消）' : '重置为 123456';
+  btn.classList.toggle('on', RESET_PW_PENDING);
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.id !== 'm-pw-reset') return;
+  if (!RESET_PW_PENDING &&
+      !confirm('把该成员的密码重置为 123456？\n\n成员原来的密码会立刻失效，' +
+               '他自己设的新密码你也看不到。')) return;
+  RESET_PW_PENDING = !RESET_PW_PENDING;
+  syncPwResetUI(true);
+});
 
 function fillAccountSelect(current) {
   const sel = document.getElementById('m-account');
@@ -1008,13 +1377,40 @@ window.editMember = async (id) => {
   document.getElementById('m-id').value = m.id;
   document.getElementById('m-name').value = m.name;
   document.getElementById('m-email').value = m.email || '';
-  document.getElementById('m-daily').value = m.limit_daily || '';
-  document.getElementById('m-weekly').value = m.limit_weekly || '';
   document.getElementById('m-note').value = m.note || '';
   document.getElementById('m-username').value = m.username || '';
-  document.getElementById('m-password').value = '';
+  await renderTierPicker(m.tier || 'plus');
+  RESET_PW_PENDING = false;
+  syncPwResetUI(true);
   pickedModels = new Set((m.model_allowlist || '').split(',').map(s => s.trim()).filter(Boolean));
+  // 打开时停在第一个已经勾选过的厂商，方便直接看到现有配置
+  activeVendor = null;
+  // 按模型的额度在列表接口里没有，单独取一次详情：那里才带
+  // model_quota_editable（目录里的模型 + 只含真正改过的窗口）。
+  modelLimits = {};
+  modelLimitSaved = {};
+  limitBase = null;
+  try {
+    const d = await api('/api/members/' + id);
+    if (d.quota) {
+      limitBase = {
+        daily: d.quota.limit_daily, total: d.quota.limit_total,
+        manual: { daily: d.member.limit_daily, total: d.member.limit_total },
+      };
+      renderBaseHint();
+    }
+    (d.model_quota_editable || []).forEach(r => {
+      if (!r.overridden) return;
+      // 未改过的那一个窗口是 null，不是 0，也不要拿生效值填回去
+      const cell = {};
+      if (r.limit_daily != null) cell.daily = r.limit_daily;
+      if (r.limit_total != null) cell.total = r.limit_total;
+      if (Object.keys(cell).length) modelLimits[r.name] = cell;
+    });
+    modelLimitSaved = JSON.parse(JSON.stringify(modelLimits));
+  } catch { /* 取不到就按默认额度显示，不影响其它字段编辑 */ }
   renderModelChips();
+  renderModelLimits(m.tier || 'plus');
   fillAccountSelect(m.preferred_account_id);
   openModal('member-modal');
 };
@@ -1024,13 +1420,15 @@ window.saveMember = async (btn) => {
   const payload = {
     name: document.getElementById('m-name').value.trim(),
     email: document.getElementById('m-email').value.trim(),
-    limit_daily: parseFloat(document.getElementById('m-daily').value || '0'),
-    limit_weekly: parseFloat(document.getElementById('m-weekly').value || '0'),
+    tier: pickedTier,
     preferred_account_id: parseInt(document.getElementById('m-account').value || '0') || null,
     model_allowlist: [...pickedModels].join(','),
     note: document.getElementById('m-note').value.trim(),
     username: document.getElementById('m-username').value.trim(),
-    password: document.getElementById('m-password').value,
+    // 管理员只能把密码重置回初始值，不能指定任意内容
+    reset_password: RESET_PW_PENDING,
+    // 按模型的额度：整份提交，留空的模型回到档位默认
+    model_limits: collectModelLimits(),
   };
   if (!payload.name) { toast('请填写名字', 'err'); return; }
   btn.disabled = true;
@@ -1041,49 +1439,6 @@ window.saveMember = async (btn) => {
     toast('已保存');
     await loadMembers();
     loadOverview();
-  } catch (e) { toast(e.message, 'err'); }
-  btn.disabled = false;
-};
-
-async function toggleMember(id) {
-  const m = MEMBERS.find(x => x.id === id);
-  if (!m) return;
-  try {
-    await api('/api/members/' + id, { method: 'PATCH',
-      body: JSON.stringify({ enabled: !m.enabled }) });
-    await loadMembers();
-  } catch (e) { toast(e.message, 'err'); }
-}
-async function delMember(id) {
-  if (!confirm('删除这个成员？他名下的密钥会一并失效。')) return;
-  try {
-    await api('/api/members/' + id, { method: 'DELETE' });
-    toast('成员已删除');
-    await loadMembers(); loadOverview();
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-/* 密钥 */
-window.openKeyModal = (memberId, name) => {
-  document.getElementById('k-member').value = memberId;
-  document.getElementById('k-member-name').textContent = name;
-  document.getElementById('k-ip').value = '';
-  document.getElementById('k-note').value = '';
-  document.getElementById('k-result').innerHTML = '';
-  openModal('key-modal');
-};
-window.createKey = async (btn) => {
-  btn.disabled = true;
-  try {
-    const d = await api('/api/keys', { method: 'POST', body: JSON.stringify({
-      member_id: parseInt(document.getElementById('k-member').value),
-      ip_allowlist: document.getElementById('k-ip').value.trim(),
-      note: document.getElementById('k-note').value.trim(),
-    }) });
-    document.getElementById('k-result').innerHTML =
-      `<div class="keybox">${esc(d.key)}</div>
-       <div class="hint">这条密钥保存在成员列表里，随时可以查看和复制。</div>`;
-    await loadMembers();
   } catch (e) { toast(e.message, 'err'); }
   btn.disabled = false;
 };
@@ -1102,8 +1457,8 @@ async function loadAnalytics(btn, notify) {
           `失败 ${fmtInt(t.errors)} · 成功率 ${t.success_rate == null ? '—' : t.success_rate.toFixed(1) + '%'}`) +
       kpi('累计 Token', `<span data-count="${t.tokens}" data-dec="0">0</span>`,
           `近 7 天 ${fmtCompact(t.tokens_7d)}`) +
-      kpi('累计积分', `<span data-count="${t.credits}" data-dec="2">0</span>`,
-          `近 7 天 ${t.credits_7d.toFixed(3)}`) +
+      kpi('累计成本', fmtMoney(t.cost),
+          `近 7 天 ${fmtMoney(t.cost_7d)}`) +
       kpi('近 7 天请求', `<span data-count="${t.requests_7d}" data-dec="0">0</span>`,
           `日均 ${Math.round(t.requests_7d / 7)} 次`) +
       kpi('在用模型', `${(a.by_model || []).length}`, `${(a.by_provider || []).length} 家厂商`);
@@ -1141,32 +1496,35 @@ async function loadAnalytics(btn, notify) {
 
     hbarList(document.getElementById('an-provider'), {
       rows: (a.by_provider || []).map(p => ({
-        label: p.label, value: p.credits, color: p.color })),
-      fmt: v => v.toFixed(3), unit: ' 积分',
+        label: p.label, value: p.cost, color: p.color })),
+      fmt: fmtMoney, unit: '',
     });
     hbarList(document.getElementById('an-members'), {
       rows: (a.by_member || []).map(m => ({
-        label: m.name, value: m.credits, color: 'var(--gold)' })),
-      fmt: v => v.toFixed(3), unit: ' 积分',
+        label: m.name, value: m.cost, color: 'var(--gold)' })),
+      fmt: fmtMoney, unit: '',
     });
 
     renderTable(document.getElementById('an-models'), a.by_model, [
       { label: '模型', fmt: r => modelCell(r.id, r.model) },
-      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
-      { label: '失败', cls: 'num', fmt: r => fmtInt(r.errors) },
-      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r =>
+      { label: '请求量', cls: 'num', dl: '请求量', fmt: r => fmtInt(r.requests) },
+      { label: '失败', cls: 'num', dl: '失败', fmt: r => fmtInt(r.errors) },
+      { label: '成功率', cls: 'num', dl: '成功率', fmt: r => pctCell(r.success_rate) },
+      { label: 'Token', cls: 'num', dl: 'Token', fmt: r =>
           `${fmtInt(r.tokens)}<div class="sub">入 ${fmtCompact(r.prompt_tokens)} · 出 ${fmtCompact(r.completion_tokens)}</div>` },
-      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
+      { label: '成本', cls: 'num', dl: '成本', fmt: r => fmtMoney(r.cost) },
     ], '还没有调用');
 
     renderTable(document.getElementById('an-accounts'), a.by_account, [
       { label: '账号', fmt: r => `${esc(r.name)}<div class="sub" style="color:${r.provider_color}">${esc(r.provider_label)}</div>` },
-      { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
-      { label: '成功率', cls: 'num', fmt: r => pctCell(r.success_rate) },
-      { label: 'Token', cls: 'num', fmt: r => fmtCompact(r.tokens) },
-      { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
+      { label: '请求量', cls: 'num', dl: '请求量', fmt: r => fmtInt(r.requests) },
+      { label: '成功率', cls: 'num', dl: '成功率', fmt: r => pctCell(r.success_rate) },
+      { label: 'Token', cls: 'num', dl: 'Token', fmt: r => fmtCompact(r.tokens) },
+      { label: '成本', cls: 'num', dl: '成本', fmt: r => fmtMoney(r.cost) },
     ], '还没有消耗');
+
+    // 最近调用跟图表一起刷新；翻页时只换那一块，不重画上面的图
+    loadRecent();
 
     if (notify) toast('数据已刷新');
   } catch (e) {
@@ -1176,54 +1534,57 @@ async function loadAnalytics(btn, notify) {
 }
 window.loadAnalytics = loadAnalytics;
 
-/* ───────── 接入页 ───────── */
-async function loadSettings() {
-  const base = location.origin + '/v1/chat/completions';
-  document.getElementById('base-url').textContent = base;
+/* ───────── 最近调用（数据页底部） ─────────
+   按 id 倒序分页，每页 100 条。翻页只换这一块，不动上面的图表。 */
+const RECENT_SIZE = 100;
+let recentPage = 1;
+
+async function loadRecent(pageVoluntarily) {
+  const body = document.getElementById('recent-body');
+  const pager = document.getElementById('recent-pager');
+  const meta = document.getElementById('recent-meta');
+  if (!body) return;
+  if (pageVoluntarily) recentPage = pageVoluntarily;
+  body.classList.add('loading');
   try {
-    const s = await api('/api/status');
-    MODELS = s.models || [];
-    PROVIDERS = s.providers || [];
-    const first = MODELS[0] ? MODELS[0].id : 'qfmodel';
-    document.getElementById('curl-example').textContent =
-`curl ${base} \\
-  -H "Authorization: Bearer sicau-PMT-..." \\
-  -H "Content-Type: application/json" \\
-  -d '{"model":"${first}","messages":[{"role":"user","content":"你好"}]}'`;
-    document.getElementById('model-list').innerHTML = MODELS.length
-      ? MODELS.map(m => `<div style="display:flex;gap:10px;align-items:baseline;
-            padding:6px 0;border-bottom:1px solid var(--rule)">
-          <span style="min-width:190px">${esc(m.name)}</span>
-          <span class="mono" style="color:var(--ink-faint);font-size:11px">${esc(m.id)}</span>
-          <span class="spacer" style="flex:1"></span>
-          <span class="pill" style="border-color:${provColor(m.provider)};color:${provColor(m.provider)}">
-            ${esc(provLabel(m.provider))}</span>
-        </div>`).join('')
-      : '尚未读取到模型';
-  } catch (e) {
-    document.getElementById('model-list').textContent = e.message;
-  }
-  try {
-    const u = await api('/api/usage');
-    const body = document.getElementById('recent-body');
+    const u = await api(`/api/usage?page=${recentPage}&size=${RECENT_SIZE}`);
+    if (meta) meta.textContent = `共 ${fmtInt(u.total)} 条`;
     if (!u.recent.length) {
       body.innerHTML = '<tr><td colspan="7" class="empty">还没有调用记录</td></tr>';
+      if (pager) pager.innerHTML = '';
       return;
     }
-    const nameOf = id => (MEMBERS.find(m => m.id === id) || {}).name || '—';
-    body.innerHTML = u.recent.slice(0, 30).map(r => `<tr>
-      <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
+    // 成员名从已加载的 MEMBERS 里取；成员被删掉后旧记录仍要能显示
+    const nameOf = id => (MEMBERS.find(m => m.id === id) || {}).name || '已删除 #' + id;
+    body.innerHTML = u.recent.map(r => `<tr>
+      <td class="mono" data-label="时间">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
         { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-      <td>${esc(nameOf(r.member_id))}</td>
-      <td>${esc(modelById(r.model).name)}<div class="sub">${esc(r.model)}</div></td>
-      <td class="num">${Number(r.credits).toFixed(4)}</td>
-      <td class="num">${fmtInt(r.total_tokens)}</td>
-      <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
+      <td data-label="成员">${esc(nameOf(r.member_id))}</td>
+      <td data-label="模型">${esc(modelById(r.model).name)}<div class="sub">${esc(r.model)}</div></td>
+      <td class="num" data-label="成本">${fmtMoney(r.cost)}</td>
+      <td class="num" data-label="Token">${fmtInt(r.total_tokens)}</td>
+      <td data-label="结果">${r.status === 200 ? '<span class="pill ok">成功</span>'
             : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
-      <td class="mono" style="font-size:11px">${esc(r.ip)}</td>
+      <td class="mono" data-label="来源" style="font-size:11px">${esc(r.ip)}</td>
     </tr>`).join('');
-  } catch { /* 忽略 */ }
+    if (pager) {
+      pager.innerHTML = `
+        <span class="spacer"></span>
+        <button class="small ghost" id="recent-prev" ${u.page <= 1 ? 'disabled' : ''}>上一页</button>
+        <span>${u.page} / ${u.pages}</span>
+        <button class="small ghost" id="recent-next" ${u.page >= u.pages ? 'disabled' : ''}>下一页</button>`;
+      const prev = document.getElementById('recent-prev');
+      const next = document.getElementById('recent-next');
+      if (prev) prev.addEventListener('click', () => loadRecent(recentPage - 1));
+      if (next) next.addEventListener('click', () => loadRecent(recentPage + 1));
+    }
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`;
+  } finally {
+    body.classList.remove('loading');
+  }
 }
+window.loadRecent = loadRecent;
 
 /* ───────── 表格与格式 ───────── */
 function pctCell(rate) {
@@ -1245,8 +1606,148 @@ function renderTable(el, rows, cols, empty) {
   el.innerHTML = `<thead><tr>${cols.map(c =>
       `<th class="${c.cls || ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map(r => `<tr>${cols.map(c =>
-      `<td class="${c.cls || ''}">${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      `<td class="${c.cls || ''}"${c.dl ? ` data-label="${esc(c.dl)}"` : ''}>${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody>`;
 }
+
+
+/* ───────── 定价 ───────── */
+let PRICING = null;
+// 四个单价列，都是每百万 token 的人民币价。
+const PRICE_FIELDS = [
+  { key: 'input', label: '输入' },
+  { key: 'output', label: '输出' },
+  { key: 'cache_read', label: '缓存读' },
+  { key: 'cache_write', label: '缓存写' },
+];
+const SOURCE_LABEL = {
+  override: '<span class="pill gold">已改</span>',
+  builtin: '<span class="pill ok">内置</span>',
+  default: '<span class="pill off">默认价</span>',
+};
+
+async function loadPricing(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    PRICING = await api('/api/pricing');
+    renderPricing();
+  } catch (e) {
+    document.getElementById('pricing-table').innerHTML =
+      `<tbody><tr><td class="empty">${esc(e.message)}</td></tr></tbody>`;
+  }
+  if (btn) btn.disabled = false;
+}
+window.loadPricing = loadPricing;
+
+function renderPricing() {
+  const p = PRICING;
+  if (!p) return;
+  const sym = p.currency_symbol || '¥';
+  const rows = p.rows || [];
+  document.getElementById('pricing-note').textContent =
+    `共 ${rows.length} 条来源 · 已改 ${Object.keys(p.overrides || {}).length} 条`;
+  const dp = p.default_price || {};
+  document.getElementById('pricing-default').textContent =
+    `入 ${sym}${dp.input} / 出 ${sym}${dp.output} / 读 ${sym}${dp.cache_read} / 写 ${sym}${dp.cache_write}`;
+  const retiredEl = document.getElementById('pricing-retired');
+  if (retiredEl) {
+    const list = p.retired || [];
+    retiredEl.textContent = list.length
+      ? list.join('、')
+      : '（空）';
+  }
+
+  const table = document.getElementById('pricing-table');
+  if (!rows.length) {
+    table.innerHTML = '<tbody><tr><td class="empty">目录为空，先接入账号</td></tr></tbody>';
+  } else {
+    table.innerHTML = `<thead><tr>
+        <th>模型</th><th>厂商 · 上游 key</th>
+        ${PRICE_FIELDS.map(f => `<th class="num">${f.label}</th>`).join('')}
+        <th>来源</th><th></th>
+      </tr></thead><tbody>${rows.map(r => {
+      const price = r.price || {};
+      return `<tr data-key="${esc(r.upstream_key)}">
+        <td>${esc(r.model_name)}<div class="sub mono">${esc(r.model_id)}</div></td>
+        <td data-label="厂商 · 上游 key">${esc(provLabel(r.provider))}<div class="sub mono">${esc(r.upstream_key)}</div></td>
+        ${PRICE_FIELDS.map(f => `<td class="num stack-prices" data-label="${f.label}">
+            <input class="price-input mono" data-field="${f.key}"
+              value="${Number(price[f.key] || 0)}" step="0.0001" min="0"
+              style="width:88px;text-align:right;padding:3px 6px">
+          </td>`).join('')}
+        <td data-label="来源">${SOURCE_LABEL[r.source] || esc(r.source)}</td>
+        <td data-label="操作"><button class="small ghost" data-act="reset"
+              title="清掉这条覆盖，回到内置表">还原</button></td>
+      </tr>`;
+    }).join('')}</tbody>`;
+
+    // 改过的单元格标个色，保存前就能看出哪些动过
+    table.querySelectorAll('.price-input').forEach(inp => {
+      inp.addEventListener('input', () =>
+        inp.style.borderColor = 'var(--gold)');
+    });
+    table.querySelectorAll('button[data-act="reset"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const key = b.closest('tr').dataset.key;
+        await api('/api/pricing', {
+          method: 'POST',
+          body: JSON.stringify({ prices: { ...collectOverrides(), [key]: {} } }),
+        });
+        toast('已还原为内置价');
+        await loadPricing();
+      });
+    });
+  }
+
+  const builtin = p.builtin || {};
+  const keys = Object.keys(builtin).sort();
+  renderTable(document.getElementById('pricing-builtin'),
+    keys.map(k => ({ key: k, ...builtin[k] })), [
+      { label: '上游 key', fmt: r => `<span class="mono">${esc(r.key)}</span>` },
+      ...PRICE_FIELDS.map(f => ({
+        label: f.label, cls: 'num', dl: f.label,
+        fmt: r => `${sym}${Number(r[f.key] || 0)}`,
+      })),
+    ], '内置表是空的');}
+
+function collectOverrides() {
+  /* 只提交真正改过的行：与当前生效价相同的行不写覆盖，
+     否则内置表以后更新了，这些行还会被旧的覆盖值钉住。 */
+  const out = {};
+  const byKey = new Map();
+  (PRICING.rows || []).forEach(r => byKey.set(r.upstream_key, r));
+  document.querySelectorAll('#pricing-table tbody tr[data-key]').forEach(tr => {
+    const key = tr.dataset.key;
+    const row = byKey.get(key);
+    if (!row) return;
+    const price = {};
+    let changed = false;
+    tr.querySelectorAll('.price-input').forEach(inp => {
+      const v = parseFloat(inp.value || '0');
+      price[inp.dataset.field] = isNaN(v) ? 0 : v;
+      const prev = Number((row.price || {})[inp.dataset.field] ?? 0);
+      if (Math.abs(prev - price[inp.dataset.field]) > 1e-9) {
+        changed = true;
+      }
+    });
+    if (changed) out[key] = price;
+  });
+  return out;
+}
+
+window.savePricing = async (btn) => {
+  btn.disabled = true;
+  try {
+    const prices = collectOverrides();
+    const r = await api('/api/pricing', {
+      method: 'POST', body: JSON.stringify({ prices }),
+    });
+    toast(r.count ? `已保存 ${r.count} 条覆盖` : '没有改动，覆盖表已清空');
+    await loadPricing();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  btn.disabled = false;
+};
 
 /* ───────── 启动 ───────── */
 const initial = location.hash.replace('#', '');
@@ -1257,12 +1758,12 @@ if (initial && document.getElementById('page-' + initial)) show(initial);
 window.addEventListener('hashchange', () => {
   const page = location.hash.replace('#', '');
   if (page && document.getElementById('page-' + page)) {
-    document.querySelectorAll('#nav a').forEach(a =>
+    document.querySelectorAll('#nav a, #nav-mobile-menu a').forEach(a =>
       a.classList.toggle('active', a.dataset.page === page));
     document.querySelectorAll('.page').forEach(p =>
       p.classList.toggle('active', p.id === 'page-' + page));
     if (page === 'analytics') loadAnalytics();
-    if (page === 'settings') loadSettings();
+      if (page === 'pricing') loadPricing();
   }
 });
 document.addEventListener('themechange', () => {

@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<script>
+  /* 首屏前套用存过的主题，避免先渲染亮色再跳暗色 */
+  try {
+    var t = localStorage.getItem('pmt_site_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan | Prometheus API</title>
+<meta name="description" content="Prometheus 的四档配额：Go / Plus / Pro / Max。按日与周两个窗口计算额度，免费提供给川农在校学生。">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/plan.css">
+</head>
+<body data-page="site">
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+
+<main data-page="go">
+<div data-component="container">
+  <section data-component="top">
+    <a class="logo" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+    </a>
+    <nav data-component="nav-desktop">
+      <ul>
+        <li><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="/data">Data</a></li>
+        <li><a href="/plan" aria-current="page">Plan</a></li>
+      </ul>
+    </nav>
+    <!-- 主题与登录不放在 nav-desktop 里：那个导航在手机上整体隐藏，
+         放进去等于手机上没法切明暗。 -->
+    <div data-slot="top-actions">
+      <button data-slot="theme-toggle" type="button" id="theme-toggle"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a data-slot="cta-button" href="/login">
+        登录
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <path d="M6.75 4.5V3a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-.75.75h-6A.75.75 0 0 1 6.75 15v-1.5M9.75 9H2.25M9.75 9 7 6.25M9.75 9 7 11.75"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/>
+        </svg></a>
+      <nav data-component="nav-mobile">
+        <button type="button" data-component="nav-mobile-toggle" aria-expanded="false"
+                aria-controls="nav-mobile-menu" class="nav-toggle" aria-label="打开菜单">
+          <span class="sr-only">打开菜单</span>
+          <svg class="icon icon-hamburger" width="24" height="24" viewBox="0 0 24 24"
+               fill="none" aria-hidden="true">
+            <path d="M19 8H5V7H19V8Z" fill="currentColor"/>
+            <path d="M19 17H5V16H19V17Z" fill="currentColor"/>
+          </svg>
+          <svg class="icon icon-close" width="24" height="24" viewBox="0 0 24 24"
+               fill="none" aria-hidden="true">
+            <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                  fill="currentColor"/>
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </section>
+  <div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+    <ul>
+      <li><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="/docs">Docs</a></li>
+      <li><a href="/data">Data</a></li>
+      <li><a href="/plan">Plan</a></li>
+      <li><a href="/login">登录</a></li>
+    </ul>
+  </div>
+
+  <div data-component="content">
+    <section data-component="hero">
+      <div data-component="desktop-app-banner">
+        <span data-slot="badge">新</span>
+        <div data-slot="content"><span data-slot="text">DeepSeek-V4.1-Flash 已支持四级思考档位。</span></div>
+      </div>
+      <div data-slot="hero-copy">
+        <div data-slot="headline">
+          <h1>独属川农人的低成本编程模型</h1>
+          <p>Prometheus Lab 社团致力于让每一个川农人都能跟上 AI 时代的浪潮，尽全力持续提供充裕的限额和对最强大开源模型的可靠访问，让您可以利用强大的 Agent 执行任务，而无需担心成本与可用性。</p>
+        </div>
+        <div data-slot="model-logos" aria-label="可用模型厂商">
+          <div data-slot="logo-marquee" id="model-logos"></div>
+        </div>
+        <p data-slot="tagline">可配合任何 harness 使用。</p>
+      </div>
+      <div data-slot="plans" id="plans"></div>
+    </section>
+
+    <section data-component="comparison">
+      <figure data-component="go-plan-chart" dir="ltr" id="quota-chart">
+        <div data-slot="heading">
+          <div>
+            <h2>使用额度</h2>
+            <p>各模型每日的预计请求次数，以及当前档位的周限额</p>
+          </div>
+          <ul data-slot="legend" aria-label="套餐" id="tier-switch"></ul>
+        </div>
+        <div data-slot="scroll">
+          <table id="quota-table">
+            <colgroup>
+              <col style="width:24%"><col><col style="width:13%"><col style="width:13%"><col style="width:15%">
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">模型</th>
+                <th scope="col" colspan="2"><span data-slot="th-long">预估请求数 / 每日</span><span data-slot="th-short">每日</span></th>
+                <th scope="col"><span data-slot="th-long">每周请求</span><span data-slot="th-short">每周</span></th>
+                <th scope="col" id="quota-limit-head"><span data-slot="th-long">周限额</span><span data-slot="th-short">限额</span></th>
+              </tr>
+            </thead>
+            <tbody id="quota-body"></tbody>
+            <tfoot id="quota-foot">
+              <tr><th scope="row"></th><td data-slot="axis" id="quota-axis"></td>
+                  <td></td><td></td><td></td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <figcaption>
+          <button data-slot="expand" type="button" aria-expanded="false">
+            <span id="expand-label">查看全部 15 个模型</span>
+            <svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true">
+              <path d="M1 1.5 6 6.5l5-5" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+          </button>
+          <a href="/docs#quota">使用说明</a>
+        </figcaption>
+      </figure>
+    </section>
+
+    <section data-component="what">
+      <div data-slot="section-title">
+        <h3>Plan 解决了什么问题？</h3>
+        <p>我们致力于将模型能力带给社团里尽可能多的人。四档配额是社团内部发放的额度，提供充裕的限额，让您能可靠地使用最强大的开源模型。这些额度概不出售，只面向 Prometheus Lab 成员与川农在校学生。</p>
+      </div>
+      <ul>
+        <li><span>[*]</span><div><strong>零成本的配额</strong>由社团统采的账号额度支撑，学生不需要自己付费。</div></li>
+        <li><span>[*]</span><div><strong>充裕的限额与可靠的访问</strong>按日与周两个窗口发放，用满后自动恢复。</div></li>
+        <li><span>[*]</span><div><strong>为尽可能多的同学打造</strong>一个 Key 同时能在终端、IDE 与桌面端使用。</div></li>
+        <li><span>[*]</span><div><strong>经过实测的模型阵容</strong>只开放社团实际跑过的模型，价格与上下文都在 <a href="/data">Data</a> 里可查。</div></li>
+      </ul>
+    </section>
+
+    <section data-component="what">
+      <div data-slot="section-title">
+        <h3>Plan 如何工作</h3>
+        <p>申请账号之后，把这一个 Key 填进你常用的 harness，就能开始用。</p>
+      </div>
+      <ul>
+        <li><span>[1]</span><div><strong>创建账号</strong>社团会通过邮箱告诉你账号信息和详细步骤。</div></li>
+        <li><span>[2]</span><div><a href="/docs#start">配置说明</a></div></li>
+        <li><span>[3]</span><div><strong>开始编程</strong>在你配置的 Agent 上使用吧！</div></li>
+      </ul>
+    </section>
+
+    <section data-component="faq">
+      <div data-slot="section-title"><h3>常见问题</h3></div>
+      <ul id="faq"></ul>
+    </section>
+
+    <section data-component="email">
+      <div data-slot="section-title">
+        <h3>第一时间获知我们的更新消息</h3>
+        <p>加入候补名单，获取抢先体验资格。</p>
+      </div>
+      <form data-slot="form" id="waitlist">
+        <input type="email" name="email" placeholder="电子邮箱地址" aria-label="电子邮箱地址" required>
+        <button type="submit">订阅</button>
+      </form>
+      <div data-slot="form-note" id="waitlist-note"></div>
+    </section>
+
+    <footer data-component="footer">
+      <div data-slot="cell"><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></div>
+      <div data-slot="cell"><a href="/docs">Docs</a></div>
+      <div data-slot="cell"><a href="/data">Data</a></div>
+      <div data-slot="cell"><a href="/plan">Plan</a></div>
+      <div data-slot="cell"><a href="/login">登录</a></div>
+    </footer>
+  </div>
+</div>
+
+<div data-component="legal">
+  <span>© <span id="year">2026</span> Prometheus Lab</span>
+  <span><a href="/docs">Docs</a></span>
+  <span><a href="/plan">Plan</a></span>
+  <span><a href="/data">Data</a></span>
+</div>
+</main>
+
+<script type="module">
+import { fmtInt, fmtMoney, fmtPct, esc } from '/assets/site.js';
+
+document.getElementById('year').textContent = new Date().getFullYear();
+
+const FAQ = [
+  ['什么是 Prometheus 的 Plan？',
+   'Plan 是社团发放的额度档位。四档（Go / Plus / Pro / Max）都按「每日」和「每周」两个窗口计算成本额度，用满后当天或当周停止，下个窗口自动恢复。所有档位的模型范围一致，区别只在额度。'],
+  ['Plan 包含哪些模型？',
+   '页面下方的额度表列出了当前对所有成员开放的模型，模型清单随上游账号池实时变化。客户端用 <code>GET /v1/models</code> 拿到的是同一份清单。'],
+  ['免费额度和 Plan 之间有什么区别？',
+   '本站的「免费」指不向个人收费：额度由社团统采的账号池承担。Plan 只决定你每天和每周能用多少，不涉及付款。'],
+  ['额度是怎么计算的？',
+   '按每次请求的真实 token 乘单价累计，缓存命中的输入按缓存价计（DeepSeek 的缓存价只有输入价的 1/50）。页面上的「预估请求数」按编码会话的典型形态折算：一轮对话里输入侧约 99% 是复用的上下文（会话历史、读过的文件、系统提示），每轮真正新增的输入只有几百到一千 token。因此 1 亿 token 的成本大概在十元量级，而不是按「全部新输入」算出来的几百元。实际能跑多少次取决于你的输入长度与模型。'],
+  ['我可以用超了会怎样？',
+   '任一窗口用满后，请求会返回 429 并说明是日额度还是周额度用尽。日额度在本地 0 点重置，周额度按自然周重置，不需要做任何操作。'],
+  ['我可以更换档位吗？',
+   '可以，找社团负责人调整即可，历史用量不会清零。'],
+  ['可以在其他编程代理中使用吗？',
+   '可以。任何能配置 OpenAI 兼容 base_url 的客户端都行：Pi、Codex、Zcode、DeepSeek Harness、Hermes、Claude Code 等。'],
+  ['数据和隐私如何？',
+   '我们只保存计费所需的元数据，不保存请求与响应的正文。<a href="/docs#privacy">隐私说明</a>列出了完整字段。'],
+];
+
+const faqRoot = document.getElementById('faq');
+FAQ.forEach(([q, a], i) => {
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <div data-slot="faq-item" data-closed>
+      <button type="button" aria-expanded="false" data-closed data-slot="faq-question">
+        <svg data-slot="faq-icon-plus" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.5 11.5H19V12.5H12.5V19H11.5V12.5H5V11.5H11.5V5H12.5V11.5Z"/></svg>
+        <svg data-slot="faq-icon-minus" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 11.5H19V12.5H5Z"/></svg>
+        <div data-slot="faq-question-text">${q}</div>
+      </button>
+      <div data-slot="faq-answer" data-closed>${a}</div>
+    </div>`;
+  li.querySelector('button').addEventListener('click', () => {
+    const item = li.querySelector('[data-slot="faq-item"]');
+    const open = item.hasAttribute('data-expanded');
+    item.toggleAttribute('data-expanded', !open);
+    item.toggleAttribute('data-closed', open);
+    li.querySelector('[data-slot="faq-answer"]').toggleAttribute('data-closed', open);
+    li.querySelector('button').setAttribute('aria-expanded', String(!open));
+  });
+  faqRoot.appendChild(li);
+});
+
+document.getElementById('waitlist').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  document.getElementById('waitlist-note').textContent =
+    '已记录。开放注册时我们会用这个邮箱通知你。';
+  ev.target.reset();
+});
+
+/* ---------- 数据 ---------- */
+const TIERS = ['go', 'plus', 'pro', 'max'];
+const TIER_LABEL = { go: 'Go', plus: 'Plus', pro: 'Pro', max: 'Max' };
+let DATA = null;
+let tier = 'go';
+let expanded = false;
+
+/* 厂商清单：模型库里出现过的都列，顺序固定，方便用户扫一眼认牌子。
+   跑马灯是纯 CSS 动画 + 内容复制一份，不需要 JS 计时器。 */
+const PROVIDERS = [
+  { key: 'deepseek', label: 'DEEPSEEK' },
+  { key: 'glm', label: 'GLM' },
+  { key: 'minimax', label: 'MINIMAX' },
+  { key: 'kimi', label: 'KIMI' },
+  { key: 'mimo', label: 'MIMO' },
+  { key: 'hunyuan', label: 'HUNYUAN' },
+  { key: 'step', label: 'STEPFUN' },
+  { key: 'qwen', label: 'QWEN' },
+  { key: 'space', label: 'SPACE-BUNNY' },
+  { key: 'muse', label: 'MUSE' },
+  { key: 'grok', label: 'GROK' },
+  { key: 'claude', label: 'CLAUDE' },
+  { key: 'gpt', label: 'GPT' },
+  { key: 'nvidia', label: 'NVIDIA' },
+];
+
+function renderLogos() {
+  // 内容复制两份，动画位移一组宽度时正好接上，形成无缝循环
+  const one = PROVIDERS.map((p) =>
+    `<span class="mlogo" data-provider="${esc(p.key)}">${esc(p.label)}</span>`
+  ).join('');
+  document.getElementById('model-logos').innerHTML =
+    `<div data-slot="logo-track">${one}${one}</div>`;
+}
+
+// 额度用不完时统一用这个符号：∞，不用「不限」之类的文字。
+const UNLIMITED = '∞';
+
+function weeklyTokens(model, tierSlug) {
+  // 后端按每模型 token 画像算好的「这档每周能烧多少 token」。
+  // null 表示单价全为 0 的免费模型：额度用不完，token 量也是无限。
+  const v = model.weekly_tokens && model.weekly_tokens[tierSlug];
+  return v === null ? null : (v || 0);
+}
+
+function weekLimit(tierSlug) {
+  // 周限额就是这一档的周预算金额，随档位切换；后端没给就显示 ∞。
+  const plan = DATA.plans.find((p) => p.slug === tierSlug);
+  const v = plan && plan.weekly;
+  return typeof v === 'number' && v > 0 ? '¥' + fmtInt(v) : UNLIMITED;
+}
+
+function renderPlans() {
+  const host = document.getElementById('plans');
+  // 卡片只报一个代表模型的周 token 规模。取每轮成本最低的**收费**模型
+  // （也就是这档实际能跑最多次的那个）：免费模型额度无限，写进卡片
+  // 会把四档都说成「∞」，看不出档位差别；也不能取排序后的第一行，
+  // 表是按额度升序排的，第一行恰好是最贵的。
+  const charged = DATA.models.filter((m) => m.daily.go !== null && m.session_cost > 0);
+  const cheapest = charged.reduce(
+    (best, m) => (!best || m.session_cost < best.session_cost ? m : best), null);
+  host.innerHTML = DATA.plans.map((p) => {
+    const tokens = cheapest ? weeklyTokens(cheapest, p.slug) : 0;
+    const tokenLine = cheapest
+      ? `<li>${check()}<span>每周 <b>${fmtTokens(tokens)}</b> token<em>${esc(cheapest.name)}</em></span></li>`
+      : '';
+    return `
+      <div data-slot="plan">
+        <div data-slot="plan-body">
+          <p data-slot="name">${esc(p.name)}</p>
+          <p data-slot="price">内部使用 · 概不出售</p>
+          <ul>
+            <li>${check()}<span>支持多家旗舰模型</span></li>
+            <li>${check()}<span>支持主流编程框架</span></li>
+            ${tokenLine}
+            ${p.bullets.slice(0, 1).map((b) => `<li>${check()}<span>${esc(b)}</span></li>`).join('')}
+          </ul>
+        </div>
+        <a href="/login">申请 ${esc(p.name)}</a>
+      </div>`;
+  }).join('');
+}
+
+function check() {
+  return `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+    <path d="M2.5 8.5 6 12l7.5-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function renderTierSwitch() {
+  document.getElementById('tier-switch').innerHTML = TIERS.map((t) => `
+    <li>
+      <button type="button" data-tier="${t}" aria-pressed="${t === tier}">
+        <i data-tier="${t}"></i>${TIER_LABEL[t]}
+      </button>
+    </li>`).join('');
+  document.getElementById('tier-switch').querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => { tier = b.dataset.tier; renderTierSwitch(); renderTable(); });
+  });
+}
+
+function renderTable() {
+  const rows = DATA.models;
+  const shown = expanded ? rows : rows.slice(0, 12);
+  // 单价全为 0 的模型请求数是 null，不参与量程，条形直接画满
+  const maxReq = Math.max(...shown.map((m) => m.daily[tier] || 0), 1);
+  // 刻度取 1/2/5 的幂次档，再从大到小挑三个间距足够大的，
+  // 否则像 1 和 10 这种在当前量程里会挤在同一像素上，标签叠在一起。
+  const axis = [];
+  for (const v of [100000, 50000, 20000, 10000, 5000, 2000,
+                   1000, 500, 200, 100, 50, 20, 10, 5, 2, 1]) {
+    const pct = (v / maxReq) * 100;
+    if (v > maxReq * 0.999) continue;
+    if (axis.length && axis[axis.length - 1].pct - pct < 11) continue;
+    axis.push({ v, pct });
+    if (axis.length === 3) break;
+  }
+  axis.reverse();  // 从小到大，渲染时左到右
+
+  document.getElementById('quota-body').innerHTML = shown.map((m) => {
+    const free = m.daily[tier] === null;
+    const n = m.daily[tier] || 0;
+    const pct = free ? 100 : (n / maxReq) * 100;
+    const weekReq = m.weekly && m.weekly[tier];
+    const est = m.estimated ? '<small>估价</small>' : '';
+    const freeTag = free ? '<small>免费</small>' : '';
+    return `
+      <tr>
+        <th scope="row"><bdi>${esc(m.name)}</bdi>
+          <span data-slot="labels">${est}${freeTag}</span></th>
+        <td data-slot="bars" aria-hidden="true">
+          ${axis.map((t) => `<span data-slot="gridline" style="inset-inline-start:${t.pct.toFixed(3)}%"></span>`).join('')}
+          <div data-slot="track">
+            <div data-slot="lane">
+              <span data-tier="${tier}" style="width:${Math.max(pct, 0.6).toFixed(3)}%"></span>
+              <span data-slot="remainder"></span>
+            </div>
+          </div>
+        </td>
+        <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(n)}</span></td>
+        <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(weekReq)}</span></td>
+        <td data-slot="number"><span>${weekLimit(tier)}</span></td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('quota-axis').innerHTML = axis
+    .map((t) => `<span style="left:${t.pct.toFixed(2)}%">${compactly(t.v)}</span>`)
+    .join('');
+
+  const btn = document.querySelector('[data-slot="expand"]');
+  btn.setAttribute('aria-expanded', String(expanded));
+  // 用独立元素承载文案：之前把 <span> 的 textContent 整个覆盖，
+  // 连带里面的 #model-count 一起抹掉，导致文案永远停在「查看全部」。
+  document.getElementById('expand-label').textContent =
+    expanded ? '收起模型列表' : `查看全部 ${rows.length} 个模型`;
+}
+
+/** token 数按「亿」或「K」显示，和 Plan 卡片里的口径一致 */
+function fmtTokens(n) {
+  if (n === null) return UNLIMITED;
+  if (!n) return '0';
+  if (n >= 1e8) return (n / 1e8).toFixed(1) + ' 亿';
+  if (n >= 1e4) return (n / 1e4).toFixed(0) + ' 万';
+  return fmtInt(n);
+}
+
+function compactly(v) {
+  if (v >= 1000) return (v / 1000) + 'K';
+  return String(v);
+}
+
+try {
+  DATA = await fetch('/api/public/plans').then((r) => r.json());
+  renderLogos();
+  renderPlans();
+  renderTierSwitch();
+  renderTable();
+  document.querySelector('[data-slot="expand"]').addEventListener('click', () => {
+    expanded = !expanded;
+    renderTable();
+  });
+} catch (e) {
+  console.error('套餐数据读取失败', e);
+  document.getElementById('quota-body').innerHTML =
+    '<tr><td colspan="5" style="padding:1rem">套餐数据暂时不可用，请稍后重试。</td></tr>';
+}
+</script>
+<script type="module" src="/assets/theme-toggle.js"></script>
+<script type="module">
+import { initMobileNav } from '/assets/nav-mobile.js';
+import { initWordmarkScroll } from '/assets/wordmark.js';
+initMobileNav();
+// 字标滚动折叠：越过 120px 后 PROMETHEUS LAB 收成 PMT
+initWordmarkScroll(document.querySelector('.wordmark'));
+</script>
+</body>
+</html>
+
+<script type="module">
+  import { mountBackdrop } from '/assets/backdrop.js';
+  mountBackdrop();
+</script>

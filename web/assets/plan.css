@@ -1,0 +1,506 @@
+/* Plan 页：Hero + 价格卡 + 额度表。
+   结构与 opencode.ai/zh/go 一致：卡片并排、表格两列数字对齐、
+   进入视口时条形从左侧展开（prefers-reduced-motion 下直接显示）。 */
+
+/* 档位色阶走后台的金色梯度：Go 淡金 → Plus 金 → Pro 青铜 → Max 深铜。
+   原来是黄/橙/红三色跳变，跟白金主题不搭。 */
+[data-page="go"] {
+  --color-go-1: #e8e8ea;
+  --color-go-2: #b8b8bd;
+  --color-go-3: #1d1d1f;
+  --color-tier-plus: #48484a;
+  --color-tier-pro: #6e6e73;
+  --color-tier-max: #1d1d1f;
+  background: transparent;
+  overflow-x: clip;
+}
+
+/* 深色档位：显式选了 dark 就直接生效；没选过才跟随系统。
+   两条必须分开写——只留 @media 的话，系统是亮色而用户手动切暗时，
+   页面底色已变黑、这几个色阶却还停在亮色档，配额条会灰得看不清。 */
+:root[data-theme="dark"] [data-page="go"] {
+  --color-go-1: #2a2a2d;
+  --color-go-2: #6e6e73;
+  --color-go-3: #ffffff;
+  --color-tier-plus: #d2d2d7;
+  --color-tier-pro: #a1a1a6;
+  --color-tier-max: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [data-page="go"] {
+    --color-go-1: #2a2a2d;
+    --color-go-2: #6e6e73;
+    --color-go-3: #ffffff;
+    --color-tier-plus: #d2d2d7;
+    --color-tier-pro: #a1a1a6;
+    --color-tier-max: #ffffff;
+  }
+}
+
+/* ---------------- 顶部横幅 ---------------- */
+
+[data-component="desktop-app-banner"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  width: fit-content;
+}
+[data-component="desktop-app-banner"] [data-slot="badge"] {
+  border: 1px solid var(--color-border-weak);
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--color-text-weak);
+}
+[data-component="desktop-app-banner"] [data-slot="text"] {
+  font-size: 13px;
+  color: var(--color-text);
+}
+[data-component="desktop-app-banner"] [data-slot="text"]:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 标题比首页小一号，但比 site.css 里的通用 38px 大一档：
+   这句话是这页的主张，值得占版面。 */
+[data-slot="headline"] h1 {
+  font-size: clamp(34px, 4.4vw, 62px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  margin-bottom: 18px;
+}
+@media (max-width: 60rem) {
+  [data-slot="headline"] h1 { font-size: clamp(26px, 6.2vw, 40px); }
+}
+
+[data-slot="headline"] p {
+  max-width: 88%;
+  margin-bottom: 0;
+}
+@media (max-width: 50rem) {
+  [data-slot="headline"] p { max-width: 100%; }
+}
+
+/* 厂商横条：横向自动滑动的跑马灯。
+   轨道内容复制了两份，位移到 -50% 时正好接回起点，视觉上无缝合上；
+   两端用 mask 渐隐，避免标签在边框处被硬切。 */
+[data-slot="model-logos"] {
+  margin: 32px 0 24px;
+  overflow: hidden;
+  padding: 10px 0;
+  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+[data-slot="logo-track"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  animation: logo-scroll 14s linear infinite;
+}
+[data-slot="model-logos"]:hover [data-slot="logo-track"] { animation-play-state: paused; }
+@keyframes logo-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="logo-track"] { animation: none; }
+}
+[data-slot="model-logos"] .mlogo {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-strong);
+  background: transparent;
+  white-space: nowrap;
+  flex: none;
+}
+[data-slot="tagline"] {
+  color: var(--color-text-weak);
+  font-size: 13px;
+}
+
+/* ---------------- 价格卡 ---------------- */
+
+[data-slot="plans"] {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 48px;
+}
+@media (max-width: 70rem) {
+  [data-slot="plans"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 34rem) {
+  [data-slot="plans"] { grid-template-columns: 1fr; }
+}
+
+[data-slot="plan"] {
+  border: 1px solid var(--color-border-weak);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+[data-slot="plan-body"] { padding: 24px 24px 8px; flex: 1; }
+[data-slot="plan"] [data-slot="name"] {
+  font-size: 15px;
+  color: var(--color-text-strong);
+  margin-bottom: 16px;
+}
+/* 额度概不出售，卡片上不出现金额；这行只是说明，不做视觉重心。 */
+[data-slot="plan"] [data-slot="price"] {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-weak);
+  margin-top: -10px;
+  margin-bottom: 20px;
+  letter-spacing: 0.01em;
+}
+[data-slot="plan"] ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px;
+}
+[data-slot="plan"] li {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--color-text);
+}
+[data-slot="plan"] li svg {
+  margin-top: 6px;
+  flex-shrink: 0;
+  color: var(--color-text-strong);
+}
+[data-slot="plan"] li b {
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+[data-slot="plan"] li span { display: block; }
+[data-slot="plan"] li em {
+  display: block;
+  font-style: normal;
+  color: var(--color-text-weak);
+  font-size: 11px;
+  /* 让 “以 xxx 计” 自然换行，别把单字挤到下一行 */
+  text-wrap: pretty;
+}
+[data-slot="plan"] > a {
+  display: block;
+  text-align: center;
+  margin: 0 24px 24px;
+  padding: 10px 16px;
+  background: var(--color-site-bg-strong);
+  color: var(--color-text-inverted);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 13px;
+  border-radius: 4px;
+}
+[data-slot="plan"] > a:hover { background: var(--color-site-bg-strong-hover); }
+
+/* ---------------- 额度表 ---------------- */
+
+[data-component="comparison"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: 0;
+  background: transparent;
+}
+
+[data-component="go-plan-chart"] {
+  margin: 0;
+  padding: 2rem var(--padding) 2rem;
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  font-weight: 440;
+  line-height: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+[data-component="go-plan-chart"] [data-slot="heading"] {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+[data-component="go-plan-chart"] h2 {
+  font-size: 0.9375rem;
+  font-weight: 530;
+  line-height: 1.25rem;
+  margin-bottom: 0.25rem;
+  color: var(--color-text-strong);
+}
+[data-component="go-plan-chart"] [data-slot="heading"] p {
+  color: var(--color-text-weak);
+  line-height: 1.25rem;
+  font-size: 0.8125rem;
+}
+[data-slot="legend"] {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0 0 0.375rem;
+  list-style: none;
+  color: var(--color-text-weak);
+  font-weight: 530;
+  white-space: nowrap;
+}
+[data-slot="legend"] li { display: flex; }
+[data-slot="legend"] button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 530;
+  padding: 0.375rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+[data-slot="legend"] button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-site-bg) 60%, transparent);
+  color: var(--color-text-strong);
+  box-shadow: inset 0 0 0 1px var(--color-border-weak);
+}
+[data-slot="legend"] i {
+  width: 3px;
+  height: 12px;
+  border-radius: 1px;
+  display: inline-block;
+}
+[data-tier="go"] { background: linear-gradient(var(--color-go-1), var(--color-go-2)); }
+[data-tier="plus"] { background: linear-gradient(hsl(45, 95%, 62%), hsl(28, 90%, 52%)); }
+[data-tier="pro"] { background: linear-gradient(hsl(28, 92%, 62%), hsl(24, 80%, 47%)); }
+[data-tier="max"] { background: linear-gradient(hsl(8, 82%, 62%), hsl(352, 68%, 48%)); }
+
+[data-slot="scroll"] { overflow-x: auto; }
+[data-component="go-plan-chart"] table {
+  width: 100%;
+  min-width: 44rem;
+  border-spacing: 0;
+  font-size: 0.8125rem;
+}
+[data-component="go-plan-chart"] thead { color: var(--color-text-weak); }
+[data-component="go-plan-chart"] thead tr { background: transparent; }
+[data-component="go-plan-chart"] thead th {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--color-border-weak);
+  border-bottom: 1px solid var(--color-border-weak);
+  font-weight: 440;
+  text-align: end;
+  white-space: nowrap;
+}
+[data-component="go-plan-chart"] thead th:first-child {
+  text-align: start;
+  border-left: 1px solid var(--color-border-weak);
+  border-start-start-radius: 6px;
+  border-end-start-radius: 6px;
+}
+[data-component="go-plan-chart"] thead th:last-child {
+  border-right: 1px solid var(--color-border-weak);
+  border-start-end-radius: 6px;
+  border-end-end-radius: 6px;
+}
+[data-component="go-plan-chart"] tbody tr > * {
+  transition: background-color 120ms ease;
+}
+[data-component="go-plan-chart"] tbody tr:hover > * {
+  background: color-mix(in srgb, var(--color-site-bg-weak) 55%, transparent);
+}
+[data-component="go-plan-chart"] tbody th {
+  padding: 0.5rem 1rem;
+  text-align: start;
+  font-weight: 400;
+  color: var(--color-text-strong);
+}
+[data-slot="labels"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+[data-slot="labels"] small {
+  border: 1px solid var(--color-border-weak);
+  padding: 0 0.25rem;
+  font-size: 0.625rem;
+  line-height: 1rem;
+  color: var(--color-text-weak);
+  border-radius: 2px;
+}
+[data-slot="bars"] { position: relative; }
+[data-slot="gridline"] {
+  position: absolute;
+  inset-block: 0;
+  border-inline-start: 1px dashed var(--color-border-weak);
+}
+[data-slot="track"] {
+  position: relative;
+  display: grid;
+  grid-template-rows: 0.5rem;
+  margin: 0.5rem 0;
+}
+[data-slot="lane"] { display: flex; gap: 0.25rem; }
+[data-slot="lane"] > [data-tier] {
+  border-radius: 2px;
+  transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-slot="remainder"] {
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-border-weak) 55%, transparent);
+}
+[data-slot="number"] {
+  padding: 0.5rem 1rem;
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* 表头的短标签只在手机出现，长标签在手机换行会挤成一条竖排字 */
+[data-slot="th-short"] { display: none; }
+[data-slot="number"] span {
+  display: block;
+  line-height: 1.1rem;
+}
+[data-slot="axis"] { position: relative; height: 1.6rem; padding: 0; }
+[data-slot="axis"] span {
+  position: absolute;
+  top: 0.4rem;
+  transform: translateX(-50%);
+  font-size: 0.6875rem;
+  color: var(--color-text-weak);
+}
+[data-slot="axis-note"] {
+  text-align: end;
+  font-size: 0.6875rem;
+  color: var(--color-text-weak);
+  padding-right: 1rem;
+}
+[data-component="go-plan-chart"] tfoot th,
+[data-component="go-plan-chart"] tfoot td { border: 0; background: none; }
+[data-component="go-plan-chart"] figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-border-weak);
+  padding-top: 0.75rem;
+}
+[data-slot="expand"] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 530;
+  padding: 0.375rem 0;
+  cursor: pointer;
+}
+[data-slot="expand"][aria-expanded="true"] svg { transform: rotate(180deg); }
+[data-component="go-plan-chart"] figcaption a {
+  color: var(--color-text-weak);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 55rem) {
+  [data-component="go-plan-chart"] [data-slot="heading"] {
+    align-items: start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  [data-slot="legend"] { padding-left: 0; flex-wrap: wrap; }
+}
+
+/* 手机：额度表改成卡片式网格。
+   table/thead/tbody/tfoot 全部 display:contents，每个 tr 用 subgrid 共享
+   四列，数字列才会在行与行之间对齐（各行独立网格对不齐）。
+   模型名占满一行，条形与三个数字落到第二行。 */
+@media (max-width: 48rem) {
+  /* 40~48rem 之间桌面网格还挤不下 44rem 的表，先放开 min-width，
+     让表格在这个区间自然压缩；48rem 以上宽度足够，恢复原样 */
+  [data-component="go-plan-chart"] table { min-width: 0; }
+}
+@media (max-width: 40rem) {
+  [data-slot="scroll"] { overflow-x: visible; }
+  [data-component="go-plan-chart"] table {
+    display: grid;
+    grid-template-columns: minmax(min-content, 1fr) repeat(3, auto);
+    min-width: 0;
+    border-spacing: 0;
+  }
+  /* colgroup 要 display:none：display:contents 会让里面的 col 变成 grid 项目，
+     把表头往后挤一列 */
+  [data-component="go-plan-chart"] colgroup { display: none; }
+  [data-component="go-plan-chart"] thead,
+  [data-component="go-plan-chart"] thead tr,
+  [data-component="go-plan-chart"] tbody,
+  [data-component="go-plan-chart"] tfoot,
+  [data-component="go-plan-chart"] tfoot tr { display: contents; }
+
+  /* 表头：四个 th 各占一列，铺成一条圆角描边 */
+  [data-component="go-plan-chart"] thead th {
+    padding: 0.375rem;
+    white-space: normal;
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+  }
+  [data-component="go-plan-chart"] thead th:first-child { padding-inline-start: 1rem; }
+  [data-component="go-plan-chart"] thead th:last-child { padding-inline-end: 1rem; }
+  [data-slot="th-long"] { display: none; }
+  [data-slot="th-short"] { display: inline; }
+
+  /* 每行两排：第一排模型名，第二排条形与数字 */
+  [data-component="go-plan-chart"] tbody tr {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: span 2;
+    grid-template-columns: subgrid;
+    grid-template-rows: subgrid;
+    align-items: center;
+    border-bottom: 1px solid var(--color-border-weak);
+  }
+  [data-component="go-plan-chart"] tbody tr:hover > * { background: none; }
+  [data-component="go-plan-chart"] tbody th {
+    grid-column: 1 / -1;
+    padding: 0.5rem 1rem 0;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+  [data-slot="bars"] {
+    grid-column: 1;
+    grid-row: 2;
+    margin: 0 1rem 0.5rem;
+  }
+  /* 网格线与条形同宽同起点，否则百分比刻度对不上条形 */
+  [data-slot="number"] {
+    grid-row: 2;
+    padding: 0 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+  }
+  [data-slot="number"]:first-of-type { padding-inline-end: 0; }
+  [data-slot="number"]:last-of-type { padding-inline-end: 1rem; }
+
+  /* 刻度轴跟着条形那一列，百分比定位仍然压在条形下方 */
+  [data-component="go-plan-chart"] tfoot th,
+  [data-component="go-plan-chart"] tfoot td:not([data-slot="axis"]) { display: none; }
+  [data-slot="axis"] {
+    grid-column: 1;
+    margin: 0 1rem;
+    padding: 0;
+  }
+}

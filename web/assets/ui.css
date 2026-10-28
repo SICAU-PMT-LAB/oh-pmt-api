@@ -91,7 +91,10 @@ body::before {
   transition: opacity .45s ease;
 }
 
-a { color: inherit; }
+/* 全站链接一律不带下划线：侧边栏的「返回厂商」「返回列表」这类链接
+   用的是裸 <a>，只有 nav a 单独关掉了下划线，其余一直带着。 */
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: none; }
 
 .serif { font-family: var(--serif); }
 .mono { font-family: var(--mono); }
@@ -129,6 +132,8 @@ a { color: inherit; }
   background: linear-gradient(180deg, transparent, var(--gold), transparent);
   opacity: .45;
 }
+a.brand { display: block; color: inherit; text-decoration: none; }
+a.brand:hover h1 { color: var(--gold); }
 .brand { padding: 0 22px 20px; border-bottom: 1px solid var(--rule); margin-bottom: 14px; }
 .brand .mark {
   display: flex; align-items: center; gap: 9px; margin-bottom: 4px;
@@ -158,9 +163,38 @@ nav a.active {
 html[data-theme="dark"] nav a.active { background: var(--gold); color: #14130f; border-color: var(--gold); }
 nav a .ico { width: 16px; text-align: center; opacity: .8; font-size: 13px; }
 .sidebar-foot {
-  margin-top: auto; padding: 16px 22px 0; border-top: 1px solid var(--rule);
+  margin-top: auto; padding: 16px 22px 0;
   font-size: 11.5px; color: var(--ink-faint); line-height: 1.6;
 }
+/* 侧栏底部第一行：主题图标 + 退出登录。退出登录和图标之间留出距离，
+   两个都能点、挨着容易点错 */
+.sidebar-row {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 4px;
+}
+.theme-icon {
+  width: 30px; height: 30px; flex: none; border-radius: 50%;
+  border: 1px solid var(--rule-strong); background: var(--paper-raised);
+  color: var(--ink-soft); cursor: pointer; display: grid; place-items: center;
+  font-size: 14px; line-height: 1; padding: 0;
+  transition: border-color .2s, color .2s, transform .2s;
+}
+.theme-icon:hover { border-color: var(--gold); color: var(--gold); }
+.theme-icon:active { transform: scale(.94); }
+.theme-icon svg {
+  width: 15px; height: 15px;
+  transition: transform .4s cubic-bezier(.22, .9, .28, 1.04);
+}
+.theme-icon:active svg { transform: scale(.86); }
+/* 退出登录：低调的小字按钮，不跟导航抢眼 */
+.logout-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; color: var(--ink-faint);
+  background: none; border: none; padding: 0; cursor: pointer;
+  text-decoration: none; margin-left: 6px;
+  transition: color .18s;
+}
+.logout-link:hover { color: var(--gold); }
+.logout-link .ico { font-size: 12px; }
 
 .main { flex: 1; min-width: 0; padding: 34px 44px 90px; }
 
@@ -249,7 +283,7 @@ h3.section .spacer { flex: 1; }
 .kpi .spark { position: absolute; right: 8px; bottom: 6px; opacity: .55; }
 
 /* ---------- 表格 ---------- */
-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 th {
   text-align: left; font-family: var(--mono); font-size: 9.5px; font-weight: 500;
   letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
@@ -257,15 +291,30 @@ th {
 }
 td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
-tbody tr { transition: background .18s; }
-tbody tr:hover { background: var(--gold-soft); }
+/* 表格不铺任何结构底色，整张表透明地落在页面或卡片上：
+   表格自身没有圆角，一旦给行铺底色就会长出一块直角色块，
+   和旁边 8~10px 圆角的卡片对不上，左右也会和周围割裂。
+   行间距靠 td 的 padding 撑开，表格因此用 border-collapse: separate。 */
+tbody tr { background: transparent; transition: color .18s; }
+tbody tr:hover td { color: var(--ink); }
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 td .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-wrap th, .table-wrap td { white-space: nowrap; }
+/* 首列固定在左侧，横向滚动时压在别的列上面。它不单独铺底色：一旦铺了，
+   左侧就会显出一块和右侧不同的色块，整行被切成两半。表格本身是透明的，
+   最左那列的底色就跟着表格一起透出所在的页面或卡片色，左右自然连成一片。
+   横向滚动时首列会略微透出下层内容，这是表格完整透明的代价。 */
 .table-wrap th:first-child, .table-wrap td:first-child {
-  position: sticky; left: 0; background: var(--card); z-index: 1;
+  position: sticky; left: 0; z-index: 1;
 }
+
+/* 悬停时整行浮起一层半透明金色，不做圆角：行是表格的一部分，
+   圆角会让它看起来像一个独立的圆角块，反而和表格的直边语言冲突。 */
+.table-wrap > table > tbody > tr:hover > td {
+  background: var(--gold-soft);
+}
+/* 首列和其他格一样只铺这一层金色，不再压实底，悬停时整行连成一条。 */
 .empty { color: var(--ink-faint); font-style: italic; padding: 22px 0; }
 
 /* ---------- 标签 ---------- */
@@ -348,6 +397,22 @@ label {
   font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--ink-faint); margin-left: 2px;
 }
+.chip.mini { font-size: 11px; padding: 1px 8px; }
+
+/* 厂商切换：先选厂商，下方只列这家能跑的模型，避免平铺几十条来源 */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* 模型 → 当前厂商的上游 key：一行一个模型，右侧列出可勾的来源 */
+.model-src-row {
+  display: flex; gap: 12px; align-items: baseline;
+  padding: 6px 0; border-bottom: 1px dashed var(--rule);
+}
+.model-src-row:last-child { border-bottom: none; }
+.model-src-name {
+  flex: none; min-width: 168px; font-size: 13px; color: var(--ink);
+  display: flex; align-items: center; gap: 6px;
+}
+.model-src-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; }
 
 .switch-row { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-soft); }
 .switch {
@@ -397,6 +462,26 @@ label {
 }
 .modal-actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 20px; }
 
+/* 弹窗里的提示条：浅蓝底 + 圆形 i，和浏览器原生提示区分开 */
+.notice {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--info-soft, #eef4fb);
+  border: 1px solid var(--info-rule, #cfe0f3);
+  border-radius: 8px; padding: 11px 13px;
+  font-size: 13px; line-height: 1.6; color: var(--ink-soft);
+}
+.notice .ico {
+  flex: none; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--info, #3b74c4); color: #fff;
+  font-size: 11px; font-style: italic; font-weight: 700;
+  display: grid; place-items: center; margin-top: 2px;
+}
+.check {
+  display: flex; gap: 8px; align-items: center;
+  font-size: 13px; color: var(--ink-soft); cursor: pointer;
+}
+.check input { width: 15px; height: 15px; margin: 0; accent-color: var(--gold); }
+
 /* ---------- 主题切换 ---------- */
 .theme-toggle {
   display: inline-flex; align-items: center; gap: 8px;
@@ -415,6 +500,23 @@ label {
   background: var(--ink); color: var(--paper); transform: scale(1.04);
 }
 html[data-theme="dark"] .theme-toggle .opt.on { background: var(--gold); color: #14130f; }
+
+/* 主题切换的圆形揭示，与 site.css 同一套：关掉默认交叉淡入，
+   新快照盖在最上层，由 charts.js 的 applyTheme 从按钮位置散开。 */
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2147483646; }
+
+/* 侧栏底部的文字按钮（退出登录等），与 nav 的区别是不占导航高亮 */
+.foot-link {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  padding: 6px 0; width: 100%; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--ink-soft); text-align: left;
+  transition: color .18s;
+}
+.foot-link:hover { color: var(--gold); }
+.foot-link .ico { width: 16px; text-align: center; opacity: .8; font-size: 12px; }
 
 /* ---------- 厂商卡片 ---------- */
 .provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 16px; }
@@ -545,6 +647,13 @@ svg.chart text { font-family: var(--mono); }
   word-break: break-all; margin-top: 8px;
 }
 html[data-theme="dark"] .keybox { background: #050505; color: var(--gold); }
+.keyrow {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.keyrow:last-child { border-bottom: 0; }
+.keyrow-main { flex: 1; min-width: 0; }
+.keyrow-act { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
 .checkin-line { font-size: 13px; line-height: 1.7; }
 .checkin-line.ok { color: var(--ink); }
 .checkin-line.err { color: var(--err); }
@@ -562,6 +671,8 @@ html[data-theme="dark"] .keybox { background: #050505; color: var(--gold); }
     animation-duration: .001ms !important; animation-delay: 0s !important;
     transition-duration: .001ms !important;
   }
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
 }
 
 @media (max-width: 1000px) {
@@ -571,13 +682,21 @@ html[data-theme="dark"] .keybox { background: #050505; color: var(--gold); }
 @media (max-width: 860px) {
   .member-table thead { display: none; }
   .member-table, .member-table tbody, .member-table tr, .member-table td { display: block; }
-  .member-table tr {
+  /* 选择器要压过桌面端的 .table-wrap > table > tbody > tr，否则卡片用纸色 */
+  .table-wrap > table.member-table > tbody > tr {
     border: 1px solid var(--rule); border-radius: 9px; background: var(--card);
     padding: 12px 14px; margin-bottom: 10px;
+    transition: background .18s, border-color .18s;
+  }
+  /* 卡片模式下调底色落在整张卡片上：格子已被强制透明，行自身也没有圆角问题 */
+  .table-wrap > table.member-table > tbody > tr:hover {
+    background: var(--gold-soft); border-color: var(--gold-line);
   }
   .member-table td {
     border: none; padding: 4px 0; white-space: normal; text-align: left !important;
     display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    /* 卡片模式下格子一律透明，底色只由整张卡片提供，避免内部再切出小色块 */
+    background: transparent !important;
   }
   .member-table td::before {
     content: attr(data-label);
@@ -586,16 +705,31 @@ html[data-theme="dark"] .keybox { background: #050505; color: var(--gold); }
   }
   .member-table td:first-child { display: block; padding-bottom: 8px; }
   .member-table td:first-child::before { display: none; }
+  /* 卡片模式下 td 是 flex 行，“可用模型”里的标签会横向排成一整行，
+     把卡片撑到上千像素宽，再被 .table-wrap 的横向滚动切成两半。
+     这一格单独改成纵向：标签名称占一行，标签自己换行铺满 */
+  .member-table td[data-label="可用模型"] {
+    display: block; max-width: none !important;
+    white-space: normal; line-height: 1.9;
+  }
+  .member-table td[data-label="可用模型"]::before {
+    display: block; margin-bottom: 4px;
+  }
   .member-table td .progress { width: 90px; margin-top: 0; }
-  .member-table tr:hover { background: var(--card); }
 }
 
 @media (max-width: 860px) {
   .layout { flex-direction: column; }
   .sidebar { width: 100%; flex: none; height: auto; position: static; padding: 16px 0; }
   .sidebar::after { display: none; }
-  nav { flex-direction: row; overflow-x: auto; padding: 0 14px; }
-  nav a { white-space: nowrap; }
+  /* 窄屏导航改成横向滑动的横条。滚动条本身藏起来，靠滑动发现右边还有项；
+     左右留出与页面内容一致的边距，滑动时不会贴死屏幕边缘 */
+  nav {
+    flex-direction: row; overflow-x: auto; padding: 0 14px 2px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  nav::-webkit-scrollbar { display: none; }
+  nav a { white-space: nowrap; flex: none; }
   .sidebar-foot { display: none; }
   .main { padding: 22px 18px 60px; }
   .page-head h2 { font-size: 25px; }
@@ -605,4 +739,88 @@ html[data-theme="dark"] .keybox { background: #050505; color: var(--gold); }
   .chart-head .s { display: none; }
   .chart-legend { font-size: 11px; gap: 10px; }
   .account-row > div:last-child { justify-content: flex-start !important; }
+}
+
+/* 手机竖屏：单列铺满、控件放大到能点准的尺寸。
+   断点放在 620px，平板上仍然是多列，手机上一律单列。 */
+@media (max-width: 620px) {
+  .main { padding: 18px 13px 56px; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-head h2 { font-size: 22px; }
+  .page-head p { font-size: 13px; }
+  /* 按钮在手机上要够高，否则手指点不准 */
+  .page-head > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn, button { min-height: 38px; }
+  .btn.small, button.small { min-height: 30px; }
+
+  /* 厂商卡片改成整行铺满，字号略收，避免长邮箱换行成两行 */
+  .provider-grid { grid-template-columns: 1fr; gap: 12px; }
+  .provider-card { padding: 15px 16px; }
+  .pc-nums .pc-num { font-size: 19px; }
+  /* 「查看账号 →」只在 hover 时淡入，手机没有 hover，永远看不到 */
+  .provider-card .pc-go { opacity: 1; transform: none; }
+  .provider-card .pc-foot { flex-wrap: wrap; }
+
+  /* 表格横向滚动时首列不粘，否则可视区域被吃掉一大块 */
+  .table-wrap th:first-child, .table-wrap td:first-child { position: static; }
+  .table-wrap { margin: 0 -13px; padding: 0 13px; }
+
+  /* 弹窗在手机上贴底铺满。改成 flex 列：内容区自己滚，操作栏是独立的
+     一块，不会和滚动内容叠在一起。之前用 sticky 时，操作栏虽然固定在
+     底部，滚动内容仍会从它周围的缝里露出来 */
+  .modal-mask { padding: 0; align-items: flex-end; }
+  .modal {
+    max-width: none; max-height: 92vh; border-radius: 14px 14px 0 0;
+    padding: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  /* 内容区是唯一的滚动容器，必须能收缩（min-height:0 是 flex 子项
+     允许小于内容高度的前提），否则它撑满整屏，滚动跑到 .modal 上，
+     操作栏就被顶出视口 */
+  .modal-scroll {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    padding: 18px 16px 8px;
+    display: flex; flex-direction: column;
+  }
+  .modal-scroll > * { flex: none; }
+  .modal > .modal-actions { flex: none; }
+  .modal-actions {
+    flex: none; margin: 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--rule); background: var(--paper);
+  }
+  .modal-actions button { flex: 1; }
+
+  /* 模型标签页在窄屏上横向滚动，不折成三行 */
+  .chip-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px;
+              -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip-row .chip { flex: none; }
+  /* 选择器必须保留自己的滚动区。取消高度限制会让一家厂商的全部模型
+     一次铺开（WorkBuddy 有二十多个），模态框被撑到上千像素，底部的
+     操作栏会把列表压住。视口矮时按比例收，最少留 150px */
+  .chip-picker { max-height: clamp(150px, 32vh, 240px); overflow-y: auto; }
+
+  /* 导航五项在手机宽度里放得下：收紧图标间距和内边距 */
+  nav { padding: 0 10px 2px; }
+  nav a { padding: 8px 9px; gap: 5px; font-size: 13px; }
+  nav a .ico { width: 13px; font-size: 12px; }
+
+  /* 图表高度收一点，手机上 200px 的图占掉半屏 */
+  .chart { max-width: 100%; }
+  .chart-card { padding: 14px 12px; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .kpi .v { font-size: 20px; }
+  .grid2, .grid3, .grid-wide-left, .grid-wide-right { gap: 12px; }
+
+  /* 账号/成员行内的操作按钮换行铺满，避免挤压文字 */
+  .account-row > div:last-child { width: 100%; }
+  .account-row > div:last-child .btn,
+  .account-row > div:last-child button { flex: 1 1 auto; }
+}
+
+/* 横屏矮视口（手机横过来）：导航压在下面会挡住内容，改回顶部横条 */
+@media (max-height: 480px) and (max-width: 860px) {
+  .sidebar { padding: 8px 0; }
+  .brand { display: none; }
+  nav { padding: 0 10px; }
 }

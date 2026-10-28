@@ -104,10 +104,12 @@ class UpstreamError(qoder.UpstreamError):
 
     @property
     def is_request_rejected(self) -> bool:
-        """请求内容被上游的渠道校验拦下（11128），账号本身没问题。
+        """请求被渠道校验拦下（11128），账号本身没问题。
 
-        这条必须和凭证失效区分开：换一个账号重发同样的内容还是会被拦，
-        给账号加冷却只会让唯一的账号在一分钟内整体不可用。
+        11128 有两类诱因：一类确实与账号所属渠道有关（国际版要求首条是
+        system、客户端模板校验），换账号可能就好；另一类改完请求就能过。
+        两种都不该给账号加冷却——那是账号级的惩罚，会让唯一的账号整体
+        不可用一分钟。重试策略由调用方决定，这里只声明「不要冷却」。
         """
         return "11128" in self.body
 
@@ -353,9 +355,15 @@ def fetch_quota(account: dict) -> dict:
 
     base_total, base_used = pick_total(base), pick_used(base)
     addon_total, addon_used = pick_total(addon), pick_used(addon)
-    total = num(body, "TotalCredits") or (base_total + addon_total)
-    used = base_used + addon_used
-    remaining = max(0.0, total - used)
+    # TotalCredits 是「还剩多少」而不是总量：实测两次快照都满足
+    # base_remaining + addon_remaining == TotalCredits。当成总量再减一次
+    # 已用，剩余会少算一个已用量，界面上「已用 + 剩余」也对不上总额。
+    remaining = num(body, "TotalCredits")
+    total = base_total + addon_total
+    if remaining <= 0 and total > 0:
+        # 上游没给 TotalCredits 时退回用包容量减已用，别把剩余报成 0
+        remaining = max(0.0, total - (base_used + addon_used))
+    used = max(0.0, total - remaining)
     return {
         "total": total,
         "used": used,
@@ -425,6 +433,10 @@ def _normalize_messages(messages: list) -> list[dict]:
 
     OpenAI 的 developer 角色在这里会整条请求被拦（11128「unapproved
     channel」，而不是参数错误），所以先转成 system。
+
+    国际版还多一条 11128「first message is not system prompt」：消息列表
+    的第一条必须是 system。国内版不查。老会话接上时首条经常是 user，所以
+    这里补一句空的 system 引导，声明「无额外设定」而不替客户端编造提示词。
     """
     out = []
     for m in messages or []:
@@ -450,6 +462,10 @@ def _normalize_messages(messages: list) -> list[dict]:
             if m.get(key):
                 item[key] = m[key]
         out.append(item)
+    # 首条不是 system 时补一个最小的。不能把首条 user 改成 system：那会把
+    # 用户的输入当成系统指令，语义变了
+    if out and out[0]["role"] != "system":
+        out.insert(0, {"role": "system", "content": "You are a helpful assistant."})
     return out
 
 

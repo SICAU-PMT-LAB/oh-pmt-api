@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 主题必须在首次绘制前落地，否则深色模式下跨页跳转会闪一下白屏 -->
+<script>
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('ohpmt_theme') || 'light'; } catch (e) {}
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#111110' : '#fdfcf8';
+})();
+</script>
+<title>账号 · oh-pmt-api</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/ui.css">
+<style>
+  .vhead {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  .vhead .glyph {
+    width: 46px; height: 46px; border-radius: 11px; display: grid; place-items: center;
+    font-family: var(--serif); font-size: 21px; font-weight: 600; flex: none;
+    border: 1px solid var(--prov-color, var(--gold)); color: var(--prov-color, var(--gold));
+    background: color-mix(in srgb, var(--prov-color, var(--gold)) 10%, transparent);
+  }
+  .vhead h2 { font-family: var(--serif); font-size: 29px; font-weight: 500; margin: 0; }
+  .vhead .sub { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .vhead .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+
+  /* 账号列表：宽屏是四列网格行，窄屏自动堆叠成卡片 */
+  .acc-card {
+    border: 1px solid var(--rule); border-radius: 11px; background: var(--card);
+    padding: 15px 17px; display: grid;
+    grid-template-columns: 1.5fr 1.1fr 1fr auto; gap: 16px; align-items: center;
+    margin-bottom: 10px;
+  }
+  .acc-card .an { font-size: 13.5px; color: var(--ink); font-weight: 500; }
+  .acc-card .as { font-size: 11.5px; color: var(--ink-faint); line-height: 1.7; }
+  .acc-card .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+  @media (max-width: 860px) {
+    .acc-card { grid-template-columns: 1fr; gap: 10px; padding: 14px; }
+    .acc-card .acts { justify-content: flex-start; }
+    .vhead .acts { margin-left: 0; width: 100%; }
+    /* 三个按钮等分一行，边框统一可见：ghost 的透明边框在手机上会让文字
+       浮在空白里，看不出那是一排按钮 */
+    .vhead .acts { gap: 8px; }
+    .vhead .acts > * {
+      flex: 1 1 0; min-width: 0; white-space: nowrap;
+      justify-content: center; text-align: center;
+      border-color: var(--rule-strong); background: var(--paper-raised);
+    }
+    .vhead h2 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <circle cx="12" cy="12" r="8.4" opacity=".45"/>
+          <circle cx="12" cy="12" r="4.6"/>
+          <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
+        </svg>
+        <h1>oh-pmt-api</h1>
+      </div>
+      <div class="kicker">厂商账号</div>
+    </div>
+    <nav>
+      <a href="/admin#overview"><span class="ico">◈</span>概览</a>
+      <a href="/admin#accounts" class="active"><span class="ico">◇</span>账号</a>
+      <a href="/admin#members"><span class="ico">◉</span>成员</a>
+      <a href="/admin#analytics"><span class="ico">▤</span>数据</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="sidebar-row">
+        <button type="button" class="theme-icon" title="切换明暗"
+                aria-label="切换明暗"></button>
+        <a href="#" class="logout-link" id="logout"><span class="ico">⏻</span>退出登录</a>
+      </div>
+      <div style="margin-top:8px"><a href="/admin#accounts" style="color:var(--gold)">← 返回厂商</a></div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="empty">正在读取…</div>
+  </main>
+</div>
+
+<script type="module">
+import { initTheme, api, toast, esc, fmtInt, fmtCompact, fmtMoney } from '/assets/charts.js';
+
+initTheme();
+
+// /accounts/vendor/<slug>，slug 是厂商标识
+const SLUG = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
+let ACCOUNTS = [], PROV = null;
+
+async function load() {
+  try {
+    const d = await api('/api/accounts');
+    ACCOUNTS = (d.accounts || []).filter(a => a.provider === SLUG);
+    PROV = (d.providers || []).find(p => p.slug === SLUG)
+      || { slug: SLUG, label: SLUG, color: 'var(--gold)', available: false, regions: {} };
+    render();
+  } catch (e) {
+    document.getElementById('main').innerHTML =
+      `<div class="card"><div class="empty">${esc(e.message)}</div>
+       <a class="btn" href="/admin#accounts">返回厂商列表</a></div>`;
+  }
+}
+
+function render() {
+  const color = PROV.color || 'var(--gold)';
+  document.documentElement.style.setProperty('--prov-color', color);
+  document.title = `${PROV.label} · oh-pmt-api`;
+
+  const rows = ACCOUNTS;
+  const usable = rows.filter(a => a.enabled && !(a.cooldown > 0)).length;
+  const remaining = rows.reduce((s, a) => s + (a.credits_remaining || 0), 0);
+  const pendingCheckin = rows.filter(a => a.supports_checkin && !a.checkin_at).length;
+
+  const sub = rows.length
+    ? `${rows.length} 个账号 · ${usable} 可用 · 剩余 ${fmtCompact(remaining)} 积分`
+    : (PROV.available ? '还没有账号' : '这一家的适配器还没接入');
+
+  document.getElementById('main').innerHTML = `
+    <div class="vhead">
+      <div class="glyph">${esc((PROV.label || SLUG).slice(0, 1))}</div>
+      <div>
+        <h2>${esc(PROV.label || SLUG)}</h2>
+        <div class="sub">${esc(sub)}</div>
+      </div>
+      <div class="acts">
+        <a class="btn" href="/admin#accounts">← 返回厂商</a>
+        ${rows.some(a => a.supports_checkin)
+          ? `<button class="ghost" id="btn-checkin-all">一键签到</button>` : ''}
+        <button class="ghost" id="btn-sync">同步额度</button>
+      </div>
+    </div>
+    <div id="list"></div>`;
+
+  const list = document.getElementById('list');
+  if (!rows.length) {
+    list.innerHTML = `<div class="card">
+      <div class="empty">${esc(PROV.label || SLUG)} 还没有账号</div>
+      ${!PROV.available ? `<div class="note">${esc(PROV.label || SLUG)} 的适配器还没有实现。
+        账号表、接口和界面都已经按厂商分开，补上
+        <span class="mono">src/providers.py</span> 里对应的适配器就能接入。</div>` : ''}
+    </div>`;
+  } else {
+    if (pendingCheckin) {
+      list.insertAdjacentHTML('beforebegin',
+        `<div class="hint" style="margin-bottom:10px">
+           ${pendingCheckin} 个账号今天还没签到</div>`);
+    }
+    list.innerHTML = rows.map(card).join('');
+    requestAnimationFrame(() => document.querySelectorAll('.progress > div[data-w]')
+      .forEach(d => { d.style.width = d.dataset.w + '%'; }));
+    list.querySelectorAll('[data-act]').forEach(btn => {
+      btn.addEventListener('click', () => act(btn));
+    });
+  }
+
+  document.getElementById('btn-sync').addEventListener('click', async () => {
+    try {
+      await api('/api/accounts/sync', { method: 'POST', body: '{}' });
+      toast('已同步额度');
+      await load();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  const all = document.getElementById('btn-checkin-all');
+  if (all) all.addEventListener('click', async () => {
+    all.disabled = true; all.textContent = '签到中…';
+    try {
+      await api('/api/accounts/checkin', {
+        method: 'POST', body: JSON.stringify({ provider: SLUG }) });
+      toast('已签到');
+      await load();
+    } catch (e) { toast(e.message, 'err'); all.disabled = false; all.textContent = '一键签到'; }
+  });
+}
+
+function card(a) {
+  const pct = a.credits_total > 0
+    ? Math.min(100, (a.credits_remaining / a.credits_total) * 100) : 0;
+  const state = !a.enabled ? '<span class="pill off">停用</span>'
+    : a.cooldown > 0 ? `<span class="pill warn">冷却 ${a.cooldown}s</span>`
+    : '<span class="pill ok"><span class="dot"></span>可用</span>';
+  const expire = a.credits_expire_at
+    ? new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN') : '不过期';
+  // 有些厂商没有邮箱（WorkBuddy 导出的就是昵称），空片段别留下多余的分隔点
+  const meta = [a.email, a.region_label, a.uid ? 'UID ' + String(a.uid).slice(0, 8) : '']
+    .filter(Boolean).map(esc).join(' · ');
+  return `<div class="acc-card">
+    <div>
+      <div class="an">${esc(a.name || a.email || a.uid)}</div>
+      <div class="as">${meta}${a.plan_name ? ' · ' + esc(a.plan_name) : ''}</div>
+      <div class="as">${a.bound_members.length
+        ? '绑定 ' + a.bound_members.map(esc).join('、') : '未绑定成员'}</div>
+    </div>
+    <div>
+      <div class="mono" style="font-size:12px">${a.credits_remaining.toFixed(1)}
+        <span style="color:var(--ink-faint)">/ ${a.credits_total.toFixed(0)}</span></div>
+      <div class="progress ${pct <= 10 ? 'err' : pct <= 30 ? 'warn' : ''}"
+           style="margin-top:5px"><div data-w="${pct.toFixed(1)}"></div></div>
+      <div class="as" style="margin-top:5px">已用 ${a.credits_used.toFixed(1)} · ${expire}</div>
+    </div>
+    <div>
+      <div style="font-size:12.5px">${fmtInt(a.requests)} 次</div>
+      <div class="as">${fmtCompact(a.tokens)} Token · ${fmtMoney(a.gateway_cost)} 成本</div>
+      ${a.supports_checkin ? `<div class="as">${
+        a.checkin_at ? '签到 ' + (a.checkin_ok ? '✓ ' + esc(a.checkin_message || '已签到')
+          : '✕ ' + esc(a.checkin_message || '失败')) : '今天还没签到'}</div>` : ''}
+    </div>
+    <div class="acts">
+      ${state}
+      <a class="btn small" href="/accounts/${a.id}">详情</a>
+      ${a.supports_checkin
+        ? `<button class="small ghost" data-act="checkin" data-id="${a.id}">签到</button>` : ''}
+      <button class="small ghost" data-act="${a.enabled ? 'disable' : 'enable'}"
+              data-id="${a.id}">${a.enabled ? '停用' : '启用'}</button>
+      <button class="small ghost" data-act="del" data-id="${a.id}">移除</button>
+    </div>
+  </div>`;
+}
+
+async function act(btn) {
+  const id = Number(btn.dataset.id);
+  const what = btn.dataset.act;
+  try {
+    if (what === 'del') {
+      if (!confirm('移除这个账号？')) return;
+      await api('/api/accounts/' + id, { method: 'DELETE' });
+      toast('已移除');
+    } else if (what === 'checkin') {
+      btn.disabled = true;
+      const res = await api('/api/accounts/checkin', {
+        method: 'POST', body: JSON.stringify({ id }) });
+      const r = (res.results || [])[0];
+      toast(r ? `${r.message}${r.earned ? ' · 到账 ' + r.earned : ''}` : '已签到',
+            r && r.ok ? '' : 'err');
+    } else {
+      await api('/api/accounts/action', {
+        method: 'POST', body: JSON.stringify({ id, action: what }) });
+      toast(what === 'enable' ? '已启用' : '已停用');
+    }
+    await load();
+  } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+}
+
+document.getElementById('logout').addEventListener('click', async e => {
+  // 退出登录是 <a href="#">，不拦的话会先跳到页首再跳登录页
+  e.preventDefault();
+  try { await api('/api/logout', { method: 'POST' }); } catch { /* 清 cookie 失败也跳走 */ }
+  location.href = '/login';
+});
+load();
+</script>
+</body>
+</html>

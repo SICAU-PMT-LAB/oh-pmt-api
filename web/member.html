@@ -1,0 +1,1218 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 主题必须在首次绘制前落地：跨页跳转（如点成员详情）时样式表还没下载完，
+     先按记住的主题刷底色，否则深色模式下会闪一下白屏 -->
+<script>
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('pmt_site_theme'); } catch (e) {}
+  if (t !== 'dark' && t !== 'light') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark' : 'light';
+  }
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#0c0c0e' : '#ffffff';
+})();
+</script>
+<title>成员详情 · oh-pmt-api</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/panel.css">
+<style>
+  /* 中文标签不用等宽字体：等宽字体的中文回退到系统黑体，
+     字宽和字母间距都会走形，9px 更是糊成一片。正文与标签一律 sans，
+     只有数字、单位、密钥这类本当等宽的用 mono。 */
+  /* .page-head 自己带左右内边距，其余块靠 margin-left/right 缩进，
+     所以 hero 在这里也要吃同样的缩进，否则它会顶到容器最左边，
+     和上面的标题、下面的卡片错开 48px。 */
+  /* site.css 的 [data-page="site"] a 给所有链接画了下划线，
+     那是给正文里的行内链接用的；这里的「← 成员列表」是按钮。
+     选择器要压过它（0,1,1），所以挂上 body[data-page] 前缀。 */
+  body[data-page="site"] .page-head a.btn,
+  body[data-page="site"] .page-head a.btn:hover { text-decoration: none; }
+
+  .hero {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 26px;
+    align-items: start; margin-bottom: 22px;
+  }
+  .hero .who { display: flex; gap: 14px; align-items: flex-start; }
+  .hero .glyph {
+    width: 46px; height: 46px; border-radius: 11px; display: grid; place-items: center;
+    font-family: var(--serif); font-size: 21px; font-weight: 600; flex: none;
+    border: 1px solid var(--gold); color: var(--gold);
+    background: var(--gold-soft);
+  }
+  .hero h2 { font-family: var(--serif); font-size: 30px; font-weight: 500; margin: 0 0 3px; }
+  .hero .meta { font-size: 12.5px; color: var(--ink-soft); line-height: 1.8; }
+  /* 元信息按片段整块换行：宽不够时「优先账号 已指定」整体移到下一行，
+     不会出现「优」孤零零留在行尾、下一行以「先账号」开头。 */
+  .hero .meta .np { display: inline-block; white-space: nowrap; margin-right: 14px; }
+  /* 右列原来是「裸环 + 有边框的 stat 盒 + 盒外的 hint」，
+     两个块对齐方式不同，hint 又落在盒子外面，看起来像溢出的文字。
+     统一成三块等高的卡：环、已用、上限，各自带边框和同样的内边距。 */
+  .hero .rings {
+    display: grid; grid-template-columns: auto auto auto; gap: 10px;
+    align-items: stretch;
+  }
+  .hero .ringbox, .hero .usedbox, .hero .capbox {
+    border: 1px solid var(--p-line); background: var(--p-surface);
+    padding: 12px 14px; display: flex; flex-direction: column;
+    justify-content: center; gap: 4px; min-width: 0;
+  }
+  .hero .ringbox { padding: 6px; align-items: center; }
+  .hero .usedbox .num-big { font-size: 22px; line-height: 1.15; }
+  .hero .usedbox .num-big small { font-size: 12px; color: var(--ink-faint); margin-left: 3px; }
+  .hero .lbl {
+    font-size: 10.5px; letter-spacing: .04em; text-transform: none;
+    color: var(--ink-soft); font-family: var(--sans);
+  }
+  .hero .hint { font-size: 11.5px; color: var(--ink-faint); margin: 0; }
+  /* 右列三格靠内容宽度撑开（auto 列）。hint 一旦允许折行，
+     auto 列会缩到最窄，「plan 累计已用」被拆成两行、中间格比环还窄。 */
+  .hero .usedbox .hint, .hero .capbox .hint { white-space: nowrap; }
+
+  /* 状态徽标那一行：.pill（inline-flex）与 .tier（inline-flex）的
+     行盒高度不一样（20.8px 对 20px，前者还带一个 4px gap 的圆点子元素），
+     并排时基线各自算，高度差就让边框底部错开 1.4px。
+     统一改成同一行的 flex，让它们真正垂直居中对齐。 */
+  .hero .flags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .hero .flags .pill, .hero .flags .tier { line-height: 16px; }
+  .hero .flags .pill { height: 20px; gap: 0; }
+  /* .pill .dot 在 panel.css 里没定义尺寸，会变成一个 0×0 的占位，
+     多出来的 4px gap 依旧把内容推偏。这里补上真正的圆点。 */
+  .hero .flags .pill .dot {
+    width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: currentColor; margin-right: 4px;
+  }
+  .hero .capbox .cap-v {
+    font-family: var(--serif); font-size: 17px; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ui.css 里的小标题是给英文用的：等宽 + 全大写 + 大字距。
+     中文没有大小写，等宽字体的中文字面又大小不一，9px 下糊成一片。
+     这里统一改成 sans、加大字号、去掉字距与全大写。 */
+  .chart-head .t, h3.section {
+    font-family: var(--sans); font-size: 12.5px; font-weight: 600;
+    letter-spacing: 0; text-transform: none; color: var(--ink);
+  }
+  .kpi .k {
+    font-family: var(--sans); font-size: 12px; font-weight: 400;
+    letter-spacing: 0; text-transform: none; color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .chart-card th, .table-wrap th, .acc-models th {
+    font-family: var(--sans); font-size: 11.5px; letter-spacing: 0;
+    text-transform: none; font-weight: 500; color: var(--ink-soft);
+  }
+
+  /* ---- 顶部：总 token 的柱状图，模仿结算页那三张卡 ---- */
+  .topgrid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-bottom: 22px;
+  }
+  .topcard { padding: 16px 18px 12px; }
+  .topcard .k {
+    font-size: 12px; color: var(--ink-soft); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .topcard .k .spacer { flex: 1; }
+  .topcard .k .view-pick { position: relative; z-index: 1; }
+  .topcard .v {
+    font-family: var(--serif); font-size: 34px; font-weight: 500;
+    line-height: 1.1; font-variant-numeric: tabular-nums;
+    margin: 2px 0 12px; letter-spacing: -.5px;
+  }
+  .topcard .v small { font-size: 14px; color: var(--ink-faint); margin-left: 6px; }
+  .topcard .foot {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 11.5px; color: var(--ink-faint); margin-top: 8px;
+  }
+  /* 不能叫 .switch：ui.css 里那是个开关滑块（定宽 34px + ::after 圆点），
+     样式会被它压住，三个按钮只能挤出第一个 */
+  .view-pick { display: inline-flex; border: 1px solid var(--rule-strong);
+               border-radius: 999px; overflow: hidden; flex: none; }
+  .view-pick button {
+    border: none; background: none; font: inherit; font-size: 11.5px;
+    padding: 1px 9px; cursor: pointer; color: var(--ink-soft);
+  }
+  .view-pick button.on { background: var(--ink); color: var(--paper); }
+  .view-pick button:not(.on):hover { color: var(--gold); }
+
+  /* ---- 限额：按元，和网关实际拦截的口径一致 ---- */
+  /* 两块额度各自成卡。原来两列只靠 22px 间距分开，0% 时两条空格子
+     连成一条横贯整卡的色带，看起来像一根进度条压着两个标题。 */
+  .limitgrid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px; align-items: stretch;
+  }
+  .limit {
+    display: flex; flex-direction: column; min-width: 0;
+    border: 1px solid var(--p-line); background: var(--p-surface);
+    padding: 12px 14px;
+  }
+  .limit .hd {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: var(--ink-soft); margin-bottom: 10px;
+  }
+  .limit .hd b {
+    font-family: var(--serif); font-size: 17px; font-weight: 500;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .limit .hd b.warn { color: var(--warn); }
+  .limit .hd b.err { color: var(--err); }
+  .segbar { display: flex; gap: 2px; margin-bottom: 10px; }
+  /* 空格子原来有 1px 边框，24 个排在一起像一排空复选框（尤其 0% 时，
+     整条看着像没渲染出来）。改成浅底色块、不描边，只让已填充的格子有形状。 */
+  /* 空格子用边框画出来：--paper-deep 与卡片背景同色，只填底色在卡里
+     等于看不见，整条进度条会像没渲染。 */
+  .segbar i {
+    flex: 1; height: 14px; border-radius: 1px;
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+    border: 1px solid var(--p-line); position: relative; overflow: hidden;
+  }
+  /* 半格：用内层渐变铺到 --fill。用背景渐变而不是再插一个元素，
+     这样 DOM 里仍然是 24 个方块，计数与无障碍朗读都不变。 */
+  .segbar i.part {
+    background: linear-gradient(to right, var(--seg-on) var(--fill),
+      color-mix(in srgb, var(--ink) 8%, transparent) var(--fill));
+    border-color: var(--seg-on);
+  }
+  .segbar i.on, .segbar i.part { --seg-on: var(--p-dv-1); }
+  .segbar i.on.ok, .segbar i.part.ok { --seg-on: var(--p-dv-1); }
+  .segbar i.on.warn, .segbar i.part.warn { --seg-on: var(--p-dv-2); }
+  .segbar i.on.err, .segbar i.part.err { --seg-on: var(--p-dv-3); }
+  .segbar i.on { background: var(--seg-on); border-color: var(--seg-on); }
+  .limit .hd b.ok { color: var(--p-dv-1); }
+  .limit .hd b.warn { color: var(--p-dv-2); }
+  .limit .hd b.err { color: var(--p-dv-3); }
+  .limit .ft { font-size: 11.5px; color: var(--ink-faint); margin-top: auto; }
+
+  /* 两条计费通道的分隔标签：颜色区分 plan（青）与 api（紫），
+     不然两组限额并排看起来是同一回事。 */
+  .chan-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .chan-tag {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
+    padding: 1px 7px; border-radius: 2px; text-transform: uppercase;
+    color: var(--p-dv-1); border: 1px solid color-mix(in srgb, var(--p-dv-1) 45%, transparent);
+  }
+  .chan-tag.api {
+    color: var(--p-dv-5); border-color: color-mix(in srgb, var(--p-dv-5) 45%, transparent);
+  }
+
+  /* ---- 用量明细 / 调用明细共用的分段控件 ---- */
+  .seg {
+    display: inline-flex; gap: 2px; background: var(--paper-deep);
+    border-radius: 7px; padding: 2px;
+  }
+  .seg button {
+    border: none; background: none; font: inherit; font-size: 12px;
+    padding: 4px 11px; border-radius: 5px; cursor: pointer;
+    color: var(--ink-soft); white-space: nowrap;
+  }
+  .seg button.on { background: var(--paper); color: var(--ink); font-weight: 600;
+                   box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .seg button:not(.on):hover { color: var(--gold); }
+
+  /* ---- 明细表：厂商行可展开成模型行 ---- */
+  .detail-table { width: 100%; border-collapse: collapse; }
+  .detail-table td { padding: 9px 10px; border-bottom: 1px dashed var(--rule);
+                     font-size: 13px; }
+  .detail-table tr:last-child td { border-bottom: none; }
+  .detail-table .num { text-align: right; font-variant-numeric: tabular-nums;
+                       white-space: nowrap; }
+  .detail-table .share { width: 34%; }
+  .detail-table tr.grp > td { padding-top: 13px; padding-bottom: 13px; }
+  .detail-table tr.kid > td { background: var(--paper-deep); font-size: 12.5px; }
+  .detail-table tr.kid td:first-child { padding-left: 26px; }
+  .expander {
+    background: none; border: none; padding: 0 6px 0 0; cursor: pointer;
+    color: var(--ink-faint); font: inherit; font-size: 11px;
+  }
+  .expander:hover { color: var(--gold); }
+
+  /* ---- 调用明细 ---- */
+  /* 有分页就不需要内部滚动：一页 20 行铺开正好一屏，
+     套一层定高滚动反而把最后一行切掉半截（行高 40 除不尽 620），
+     还会在卡片里再出现一条滚动条。 */
+  .calls { transition: opacity .12s ease; }
+  .calls.loading { opacity: .45; }
+  .calls table { width: 100%; border-collapse: collapse; }
+  .calls td, .calls th { white-space: nowrap; padding: 8px 10px; }
+  .calls .num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* 「元」那列的数字长短差得远（¥0.0000135 到 ¥7.29），
+     不给它单独留宽度就会和结果列贴在一起 */
+  .calls .num.cost { min-width: 104px; }
+  .calls .st { width: 1%; padding-left: 16px; }
+
+  .pager {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 12px 2px 0; font-size: 12px; color: var(--ink-soft);
+  }
+  .pager .spacer { flex: 1 }
+  .pager button {
+    border: 1px solid var(--rule-strong); background: var(--paper);
+    border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 12px;
+    cursor: pointer; color: var(--ink-soft);
+  }
+  .pager button:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  .pager select {
+    font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid var(--rule-strong); background: var(--paper);
+    color: var(--ink-soft);
+  }
+
+  .acc-row .sub { font-size: 12px; color: var(--ink-soft); }
+  .acc-models { margin-top: 10px; }
+  .acc-models table { width: 100%; border-collapse: collapse; }
+  .acc-models td { font-size: 12.5px; padding: 7px 10px 7px 0;
+                   border-bottom: 1px dashed var(--rule); }
+  .acc-models .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* 按模型的额度明细：一行一个模型，列宽固定，窄屏折成两行 */
+  .mq { border-top: 1px solid var(--p-line); }
+  .mq-head, .mq-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 54px 54px 132px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    font-size: 12.5px;
+  }
+  .mq-head {
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--p-text-3);
+    border-bottom: 1px solid var(--p-line);
+  }
+  .mq-row { border-bottom: 1px dashed var(--p-line); }
+  .mq-row:last-child { border-bottom: none; }
+  .mq-name { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .mq .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* 图表容器必须是可收缩的网格子项：否则 svg 量宽度时量到的是一个
+     已经被内容撑开的宽度，画出来比容器还宽，窄屏下右边就被切掉。 */
+  .chart-card, .grid2 > *, .calls, .topcard { min-width: 0; }
+
+  @media (max-width: 1040px) {
+    .topgrid { grid-template-columns: 1fr 1fr; }
+    .topgrid > :nth-child(3) { grid-column: 1 / -1; }
+  }
+  @media (max-width: 940px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero .rings { flex-wrap: wrap; }
+  }
+  @media (max-width: 620px) {
+    /* 三个方框并排在 390px 下每格只剩一百出头，标题会拆成两行。
+       改成环占左上一整列、两个数字格子叠在右边。 */
+    .hero .rings {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px;
+    }
+    .hero .ringbox { grid-row: span 2; }
+    .hero .usedbox, .hero .capbox { padding: 10px 12px; }
+    .hero .usedbox .num-big { font-size: 20px; }
+    .hero .ringbox svg { width: 96px; height: 96px; }
+  }
+  @media (max-width: 720px) {
+    /* 四个数字挤不进一行：名字独占一行，日 / 周平分第二行，额度第三行。
+       三列并排时额度那句「¥15.00 / ¥100.00」会被拆成两行。 */
+    .mq-head { display: none; }
+    .mq-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      row-gap: 2px;
+      padding: 9px 0;
+    }
+    .mq-name { grid-column: 1 / -1; white-space: normal; }
+    .mq-row > .num:last-child { grid-column: 1 / -1; }
+    .mq .num { text-align: left; }
+    .mq .num::before {
+      content: attr(data-l) ' ';
+      color: var(--p-text-3);
+      font-size: 11px;
+    }
+    .topgrid { grid-template-columns: 1fr; }
+    .topgrid > :nth-child(3) { grid-column: auto; }
+    .limitgrid { grid-template-columns: 1fr; gap: 12px; }
+  }
+  @media (max-width: 620px) {
+    .hero h2 { font-size: 26px; }
+    .topcard .v { font-size: 32px; }
+    /* 分页条元素多，窄屏让它整块换行，别把「每页」挤到两行 */
+    .pager { gap: 6px; }
+    .pager .spacer { display: none; }
+    .pager > * { flex: none; }
+    .pager label { white-space: nowrap; }
+    /* 调用明细在窄屏只留当前口径那一列：三列并排 + 时间 + 账号 + 模型
+       在 430px 里一定放不下，会挤到横向滚动 */
+    .calls .opt, .calls .cost-opt { display: none; }
+    /* 430px 里四列必须都收窄：时间 92 + 账号 96 + 模型 145 + Token 63
+       就 459 了，超过 378 的容器 */
+    .calls td, .calls th { padding: 7px 5px; font-size: 12px; }
+    /* 时间列两行排（日期 / 时分），单行「10/25 17:12」要 74px，
+       挤掉账号列会和它叠在一起 */
+    .calls .when { font-size: 11px; line-height: 1.35; white-space: normal; }
+    .calls .when .d, .calls .when .t { display: block; }
+    .calls td:nth-child(2) { max-width: 82px; overflow: hidden;
+                             text-overflow: ellipsis; }
+    .calls td:nth-child(3) { max-width: 108px; overflow: hidden;
+                             text-overflow: ellipsis; }
+    .calls .num.cost { min-width: 0; }
+  }
+</style>
+</head>
+<body data-page="site">
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+
+<div data-component="container">
+
+  <section data-component="top">
+    <a class="brand" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+      <span class="kicker">成员详情</span>
+    </a>
+
+    <nav id="nav">
+      <a href="/admin#overview" data-page="overview">概览</a>
+      <a href="/admin#accounts" data-page="accounts">账号</a>
+      <a href="/admin#members" data-page="members" class="active">成员</a>
+      <a href="/admin#analytics" data-page="analytics">数据</a>
+      <a href="/admin#pricing" data-page="pricing">定价</a>
+    </nav>
+
+    <div class="top-actions">
+      <button type="button" class="theme-icon" id="theme-toggle"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a href="#" class="logout-btn" id="logout" aria-label="退出登录" title="退出登录"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="transform:scaleX(-1)"><path d="M6.75 4.5V3a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-.75.75h-6A.75.75 0 0 1 6.75 15v-1.5M9.75 9H2.25M9.75 9 7 6.25M9.75 9 7 11.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg><span class="t">退出</span></a>
+      <button type="button" class="nav-toggle" aria-expanded="false"
+              aria-controls="nav-mobile-menu" aria-label="打开菜单">
+        <span class="sr-only">打开菜单</span>
+        <svg class="icon icon-hamburger" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="square"/>
+        </svg>
+        <svg class="icon icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+    <a href="/admin#overview" data-page="overview">概览</a>
+    <a href="/admin#accounts" data-page="accounts">账号</a>
+    <a href="/admin#members" data-page="members" class="active">成员</a>
+    <a href="/admin#analytics" data-page="analytics">数据</a>
+    <a href="/admin#pricing" data-page="pricing">定价</a>
+  </div>
+
+  <main class="main" id="main">
+    <div class="empty">正在读取…</div>
+  </main>
+
+  <footer class="panel-foot">
+    <span>© <span id="year">2026</span> Prometheus Lab · 成员详情</span>
+    <span>
+      <a href="/">站点首页</a> ·
+      <a href="/data">公开数据</a> ·
+      <a href="/docs">Docs</a>
+    </span>
+  </footer>
+</div>
+
+<!-- 发放 API 通道余额：管理页唯一的入口，之前只能手写 curl 调接口 -->
+<div class="modal-mask" id="topup-modal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-scroll">
+      <h3>发放 API 余额</h3>
+      <div class="field" style="margin-bottom:14px">
+        <label for="tp-amount">金额（元）</label>
+        <input id="tp-amount" type="number" step="0.01" placeholder="例如 50">
+        <div class="hint">记一笔正数入账。填负数等于冲正，可在流水里看到。
+        </div>
+      </div>
+      <div class="field">
+        <label for="tp-note">备注</label>
+        <input id="tp-note" maxlength="120" placeholder="例如：10 月发放">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-tpclose>取消</button>
+      <button class="btn primary" data-tpsubmit>确认发放</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import {
+  api, toast, esc, fmtInt, fmtCompact, fmtMoney,
+  lineChart, ringChart, countUp,
+} from '/assets/charts.js';
+import { mountBackdrop } from '/assets/backdrop.js';
+import { initWordmarkScroll } from '/assets/wordmark.js';
+import { initMobileNav } from '/assets/nav-mobile.js';
+import '/assets/theme-toggle.js';
+
+mountBackdrop();
+initWordmarkScroll(document.querySelector('.wordmark'));
+initMobileNav();
+
+const MEMBER_ID = Number(location.pathname.split('/').filter(Boolean).pop());
+let DATA = null;
+
+// 三种计量口径。切到哪个，用量明细与调用明细的计量列就显示哪个，
+// 顶部三张卡不受影响——总量本来就是三种一起给的。
+//   token  : 全部请求的 token（积分制上游也消耗 token，一并计入）
+//   credit : 积分制上游报的积分，token 制厂商没有这一项
+//   cost   : token 制厂商按单价算的元，积分制厂商不进这里
+const VIEW = {
+  token: { key: 'token', tag: 'Token', fmt: v => fmtCompact(v), label: 'token' },
+  credit: { key: 'credit', tag: '积分', fmt: v => fmtCredit(v), label: '积分' },
+  cost: { key: 'cost', tag: '元', fmt: v => fmtMoney(v), label: '元' },
+};
+const VIEWS = ['token', 'credit', 'cost'];
+
+// 每种口径下，某个模型行 / 厂商行取哪个数当「用量」
+function viewValue(row, view) {
+  if (view === 'token') return Number(row.tokens || 0);
+  if (view === 'credit') return Number(row.credits || 0);
+  return Number(row.cost || 0);
+}
+
+// 堆叠图要按账号区分颜色，取一组在明暗两套主题下都能读的中性色
+const PALETTE = ['#a8842c', '#2f6b6b', '#6b4a8f', '#2e5aa8',
+                 '#a33b2c', '#6b7d5a', '#8a6a3a', '#8c8677'];
+
+// 积分：上游单次扣 0.01~0.2，WorkBuddy 甚至只有千分之几个积分。
+// 固定两位小数会把这些全显示成 0，所以小额按有效数字给位。
+function fmtCredit(n) {
+  const v = Number(n || 0);
+  if (!v) return '0';
+  const a = Math.abs(v);
+  if (a >= 10000) return (v / 1000).toFixed(0) + 'k';
+  if (a >= 1000) return (v / 1000).toFixed(1) + 'k';
+  if (a >= 10) return String(Math.round(v));
+  if (a >= 1) return v.toFixed(1).replace(/\.0$/, '');
+  if (a >= 0.1) return v.toFixed(2);
+  if (a >= 0.01) return v.toFixed(3);
+  if (a >= 0.001) return v.toFixed(4);
+  return v.toPrecision(2);
+}
+
+async function load() {
+  try {
+    DATA = await api('/api/members/' + MEMBER_ID);
+    render();
+  } catch (e) {
+    document.getElementById('main').innerHTML =
+      `<div class="card"><div class="empty">${esc(e.message)}</div>
+       <a class="btn" href="/admin#members">返回成员列表</a></div>`;
+  }
+}
+
+function pctOf(v, total) {
+  if (!(total > 0)) return 0;
+  return Math.min(100, Math.max(0, (Number(v) / Number(total)) * 100)).toFixed(1);
+}
+function pctLabel(v, total) {
+  if (!(total > 0)) return '—';
+  return (Number(v) / Number(total) * 100).toFixed(1) + '%';
+}
+
+// ============ 全局状态 ============
+// 三种口径各记一个当前选中项，页面重绘后保持住
+const ST = {
+  view: 'token',
+  detail: 'model',      // 用量明细看 模型 / 厂商
+  openProv: {},         // 厂商行展开状态
+  calls: {
+    days: 0,            // 0 = 全部
+    page: 1,
+    size: 20,
+    total: 0, rows: [], capped: 0, cap: 3000, pages: 1, loading: false,
+  },
+};
+
+const DAYS_OPTS = [
+  { v: 1, label: '今天' },
+  { v: 7, label: '7 天' },
+  { v: 30, label: '30 天' },
+  { v: 0, label: '全部' },
+];
+const SIZE_OPTS = [20, 50];
+
+function segControl(items, cur, attr) {
+  return `<div class="seg">${items.map(o => `<button data-${attr}="${o.v}"
+    class="${o.v === cur ? 'on' : ''}">${o.label}</button>`).join('')}</div>`;
+}
+
+// 把一段百分比画成格子条，和结算页的限额条同一种形状
+// 24 个方块铺满一行，但每个方块再切成 1/3、2/3、3/3 三档填充，
+// 相当于 72 级精度。原来的做法是 Math.ceil 到整块，12% 和 14% 画出来
+// 一模一样，看进度条分不出差别。
+const SEG_N = 24;
+const SEG_STEPS = 3;
+function segBar(pct, tone) {
+  const steps = Math.round(Math.max(0, Math.min(100, pct)) / 100 * SEG_N * SEG_STEPS);
+  return `<div class="segbar">${Array.from({ length: SEG_N }, (_, i) => {
+    const fill = Math.max(0, Math.min(SEG_STEPS, steps - i * SEG_STEPS));
+    const cls = fill === SEG_STEPS ? 'on ' + (tone || '') : fill > 0 ? 'part ' + (tone || '') : '';
+    // fill=1/3 用 33.33%，2/3 用 66.67%
+    const style = fill > 0 && fill < SEG_STEPS
+      ? ` style="--fill:${(fill / SEG_STEPS * 100).toFixed(2)}%"` : '';
+    return `<i class="${cls}"${style}></i>`;
+  }).join('')}</div>`;
+}
+
+function render() {
+  const d = DATA;
+  const m = d.member;
+  const q = d.quota;
+  const t = d.totals;
+  const daily = d.daily || {};
+  const provMap = {};
+  (d.by_provider || []).forEach(p => { provMap[p.slug] = p; });
+
+  document.title = `${m.name} · 成员详情 · oh-pmt-api`;
+
+  // ---- 顶部三张卡：token 总数 / 请求次数 / 限额 ----
+  // token 走全部请求，不分口径；请求数同理。第三张给的是当日消耗的元，
+  // 那是网关真正拿来拦截的数。
+  // 用不分口径的日总量：积分口径的成员也有 token，顶部不能只看一个口径。
+  // 窗口固定 14 天，但成员往往只有近几天有量，前面一串 0 会把柱子挤没，
+  // 所以从第一个有数据的日子开始画。
+  const all = d.daily_all || [];
+  const cards = `
+    <div class="card topcard">
+      <div class="k">Token 总数</div>
+      <div class="v"><span data-count="${t.tokens}" data-dec="0">0</span></div>
+      <div class="foot"><span>入 ${fmtCompact(t.prompt_tokens)}</span>
+        <span>出 ${fmtCompact(t.completion_tokens)}</span></div>
+    </div>
+
+    <div class="card topcard">
+      <div class="k">请求次数</div>
+      <div class="v"><span data-count="${t.requests}" data-dec="0">0</span></div>
+      <div class="foot"><span>失败 ${fmtInt(t.errors)} · 成功率 ${
+        t.success_rate == null ? '—' : t.success_rate.toFixed(1) + '%'}</span>
+        <span>${t.accounts} 个账号</span></div>
+    </div>
+
+    <div class="card topcard">
+      <div class="k">今日消耗</div>
+      <div class="v"><span data-count="${q.used_today || 0}" data-dec="2">0</span><small>元</small></div>
+      <div class="foot"><span>累计 ${money(q.used_total)} 元</span>
+        <span>${q.pct_today == null ? '日限额不限'
+          : '日额度已占 ' + q.pct_today.toFixed(1) + '%'}</span></div>
+    </div>`;
+
+  // ---- 用量限额：日限额 / 周限额，都用百分比，和网关拦截口径一致 ----
+  // 两条计费通道分开算：plan 按档位百分比扣减（走 usage 的 cost），
+  // API 按 api_credits 余额扣减。混在一起看会以为「还有额度」，
+  // 实际上走 API 通道的密钥一开始就会被拒。
+  // 限额一律用百分比，折算成成本会与「还能用多少」的实际口径打架。
+  const apiBal = (d.api && d.api.balance) || 0;
+  const apiTop = (d.api && d.api.topup_total) || 0;
+  const limitBlock = `
+    <div class="chart-card" style="margin-bottom:22px">
+      <div class="chart-head"><span class="t">用量限额</span>
+        <span class="spacer"></span>
+        <span class="sub">plan 按档位扣，API 按余额扣</span></div>
+      <div class="chan-row"><span class="chan-tag">PLAN 通道</span>
+        <span class="sub">额度由档位决定，${esc((q.tier || 'plus').toUpperCase())} 档</span></div>
+      <div class="limitgrid">
+        ${limitRow('日限额', q.pct_today,
+          q.pct_today != null ? `${resetLabel(q.reset_at)} 重置` : '不限，每天 0 点清零')}
+        ${limitRow('周限额', q.pct_total, q.pct_total != null ? '' : '不限')}
+      </div>
+      ${modelQuotaBlock(d.model_quota || [])}
+      <div class="chan-row" style="margin-top:18px"><span class="chan-tag api">API 通道</span>
+        <span class="sub">按密钥计费，余额用完即拒</span></div>
+      <div class="limitgrid">
+        <div class="limit">
+          <div class="hd"><span>账户余额</span>
+            <b class="${apiBal <= 0 ? 'err' : apiBal < 5 ? 'warn' : 'ok'}">${money(apiBal)}</b></div>
+          ${apiBar(apiBal, apiTop)}
+          <div class="ft">${apiBal > 0
+            ? 'api_credits 账本余额'
+            : '余额为 0：走 API 通道的密钥会被直接拒绝'}</div>
+        </div>
+        <div class="limit">
+          <div class="hd"><span>累计发放</span>
+            <b>${money(apiTop)}</b></div>
+          <div class="ft" style="margin-top:0">${(d.api && d.api.ledger && d.api.ledger.length)
+            ? `最近 ${d.api.ledger.length} 笔，账本可追溯`
+            : '还没有发放记录。'}</div>
+        </div>
+      </div>
+      <div class="chan-row" style="margin-top:14px">
+        <span class="sub">admin 发放后成员才能建 API 密钥；余额为 0 时这条路会被拒。</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn small" data-topup>发放余额</button>
+      </div>
+    </div>`;
+
+  // 余额没有「上限」可比，进度条的分母取「发放总额与余额的较大者」，
+  // 这样刚发放完是满格，花掉的部分留白。
+  function apiBar(bal, top) {
+    const denom = Math.max(bal, top, 0.01);
+    return segBar(bal / denom * 100, bal <= 0 ? 'err' : bal < 5 ? 'warn' : 'ok');
+  }
+
+  // 按模型的额度明细：只列用过的模型。没调过的模型默认拿整份档位额度，
+  // 全都列出来会把这张卡撑成一长串 0。
+  function modelQuotaBlock(rows) {
+    const used = rows.filter(r => (r.used_total || 0) > 0 || r.overridden);
+    if (!used.length) return '';
+    // 用自定义网格而不是 table.stack：这张表行多、每行只有四个短数字，
+    // 交给通用的卡片模式会把每个模型摊成一张三行高的大卡，手机上这条
+    // 明细能撑出好几屏。窄屏下每行折成「名字 + 已调 / 日 周 额度」两行。
+    return `<div class="mq" style="margin-top:18px">
+      <div class="sub" style="margin-bottom:8px">
+        按模型的额度占用（日 / 周，合计 = 网关拦截口径）</div>
+      <div class="mq-head" aria-hidden="true"><span>模型</span>
+        <span class="num">日</span><span class="num">周</span>
+        <span class="num">额度（日 / 周）</span></div>
+      ${used.map(r => `<div class="mq-row">
+        <span class="mq-name">${esc(r.label)}${r.overridden
+          ? '<span class="pill warn">已调</span>' : ''}</span>
+        <span class="num" data-l="日">${r.pct_daily == null ? '—' : r.pct_daily.toFixed(1) + '%'}</span>
+        <span class="num" data-l="周">${r.pct_total == null ? '—' : r.pct_total.toFixed(1) + '%'}</span>
+        <span class="num sub" data-l="额度">${r.limit_daily > 0 ? money(r.limit_daily) : '不限'}
+          / ${r.limit_total > 0 ? money(r.limit_total) : '不限'}</span>
+      </div>`).join('')}</div>`;
+  }
+
+  // pv 是各模型份额之和（额度按模型各算一份），不是「已花 / 档位金额」：
+  // 把某个模型调小之后，花掉的钱可能远小于档位金额而份额已经满了。
+  function limitRow(name, pv, foot) {
+    const limited = pv != null;
+    const v = limited ? Math.min(100, pv) : 0;
+    // 用量低不该报警。阈值照 80% 起算，色相才有意义。
+    const tone = v >= 100 ? 'err' : v >= 80 ? 'warn' : v > 0 ? 'ok' : '';
+    return `<div class="limit">
+      <div class="hd"><span>${name}</span>
+        <b class="${tone}">${limited ? v.toFixed(0) + '%' : '不限'}</b></div>
+      ${segBar(v, tone)}
+      ${foot ? `<div class="ft">${foot}</div>` : ''}
+    </div>`;
+  }
+
+  // 必须包一层 .page：panel.css 的重心是
+  //   .page > *:not(.page-head)        → 左右缩进 --p-pad
+  //   .page > .page-head + *           → 首块上间距
+  //   .page > *:not(.page-head) + *    → 块间距
+  // 直接塞进 #main 的话这三条全都匹配不到，页面会贴着左缘、块与块之间贴死。
+  document.getElementById('main').innerHTML = `
+    <section class="page active">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Member</div>
+        <h2>${esc(m.name)}</h2>
+        <p>该成员在每个上游账号上的消耗与额度。</p>
+      </div>
+      <div class="actions">
+        <a class="btn small" href="/admin#members">← 成员列表</a>
+        <button class="btn small" id="btn-edit">编辑额度</button>
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="who">
+        <div style="min-width:0">
+          <div class="meta">
+            <div>登录账号 ${m.username ? esc(m.username) : '未设置'}${
+              m.email ? ' · ' + esc(m.email) : ''}</div>
+            <div><span class="np">加入于 ${
+              new Date(m.created_at * 1000).toLocaleDateString('zh-CN')}</span>
+              <span class="np">优先账号 ${
+                m.preferred_account_id ? '已指定' : '共用账号池'}</span></div>
+          </div>
+          <div class="flags" style="margin-top:8px">
+            ${!m.enabled ? '<span class="pill off">停用</span>'
+              : m.is_admin ? '<span class="pill gold">管理员</span>'
+              : '<span class="pill ok"><span class="dot"></span>正常</span>'}
+            <span class="tier" data-tier="${esc(m.tier || 'plus')}">${esc((m.tier || 'plus').toUpperCase())}</span>
+            ${m.model_allowlist ? '' : '<span class="pill">全部模型</span>'}
+          </div>
+          ${m.note ? `<div class="hint" style="margin-top:8px">${esc(m.note)}</div>` : ''}
+        </div>
+      </div>
+      <div class="rings">
+        <div class="ringbox" id="ring-total"></div>
+        <div class="usedbox">
+          <div class="num-big">
+            <span data-count="${q.used_total || 0}" data-dec="2">0</span><small>元</small></div>
+          <div class="lbl">plan 累计已用</div>
+          <div class="hint">今日 ${money(q.used_today)}</div>
+        </div>
+        <div class="capbox">
+          <div class="cap-v">${q.pct_today == null ? '不限'
+            : q.pct_today.toFixed(1) + '%'}</div>
+          <div class="lbl">日额度已占</div>
+          <div class="hint">${q.pct_today == null ? '没有日额度'
+            : resetLabel(q.reset_at) + ' 重置'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="topgrid">${cards}</div>
+
+    ${limitBlock}
+
+    <div class="chart-card" style="margin-bottom:22px">
+      <div class="chart-head">
+        <span class="t">用量明细</span>
+        <span class="spacer"></span>
+        <span class="view-pick"><button data-view="token" class="${
+          ST.view === 'token' ? 'on' : ''}">token</button><button data-view="credit"
+          class="${ST.view === 'credit' ? 'on' : ''}">积分</button><button
+          data-view="cost" class="${ST.view === 'cost' ? 'on' : ''}">元</button></span>
+        ${segControl([{ v: 'model', label: '按模型' }, { v: 'provider', label: '按厂商' }],
+          ST.detail, 'detail')}
+      </div>
+      <div class="table-wrap">
+        <table class="detail-table stack">
+          <thead><tr>
+            <th>${ST.detail === 'model' ? '模型' : '厂商'}</th>
+            <th class="num">请求</th>
+            <th class="num">Token</th>
+            <th class="num">积分</th>
+            <th class="num">元</th>
+            <th class="num share">占比</th>
+          </tr></thead>
+          <tbody id="detail-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:22px">
+      <div class="chart-head">
+        <span class="t">调用明细</span>
+        <span class="spacer"></span>
+        ${segControl(DAYS_OPTS.map(o => ({ v: o.v, label: o.label })), ST.calls.days, 'days')}
+      </div>
+      <div class="calls" id="calls"></div>
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <div class="card" id="keys-card">
+      <div class="card-head">
+        <h3 class="section" style="margin:0">密钥</h3>
+      </div>
+      <div id="keys-list">${keyListHtml(d.keys || [])}</div>
+      <div class="hint" style="margin-top:12px">
+        密钥由成员自己在控制台创建与删除，管理员只能看前缀和启停。
+        完整内容只在创建那一刻给到成员，之后库里只留哈希，谁都取不回来。</div>
+    </div>
+
+    <div class="card danger-zone">
+      <div class="card-head">
+        <h3 class="section" style="margin:0">账号状态</h3>
+      </div>
+      <div class="danger-row">
+        ${m.is_admin ? `<div class="danger-text">
+            <b>管理员账号</b>
+            <span class="hint">管理员不能停用也不能删除，否则门外没有任何界面能改回来。</span>
+          </div>` : `<div class="danger-text">
+            <b>${m.enabled ? '停用这个成员' : '重新启用'}</b>
+            <span class="hint">${m.enabled
+              ? '停用后他名下的密钥立刻失效，配额与历史记录都保留。' : '成员现在是停用状态，启用后密钥马上可用。'}</span>
+          </div>
+          <button class="btn small" data-mact="toggle">${m.enabled ? '停用' : '启用'}</button>`}
+      </div>
+      ${m.is_admin ? '' : `<div class="danger-row">
+        <div class="danger-text">
+          <b>删除成员</b>
+          <span class="hint">他名下的密钥一并失效，用量记录保留在库里。此操作不可撤销。</span>
+        </div>
+        <button class="btn small danger" data-mact="del">删除</button>
+      </div>`}
+    </div>
+    </section>
+  `;
+
+  document.querySelectorAll('[data-count]').forEach(n =>
+    countUp(n, Number(n.dataset.count), { decimals: Number(n.dataset.dec || 0) }));
+
+  // 环图按周额度占用百分比画，限额已统一成百分比口径
+  ringChart(document.getElementById('ring-total'), {
+    value: q.pct_total == null ? 0 : Math.min(100, q.pct_total),
+    total: 100,
+    size: 108,
+    label: q.pct_total == null ? '不限' : '周额度',
+  });
+
+  renderDetail(d);
+  renderCalls();
+  bindEvents();
+}
+
+// ============ 密钥 / 成员操作 ============
+// 管理员对密钥只有启停这一条写操作。创建、重置、删除都归成员自己：
+// 前两个会在响应里返回明文，第三个介于「替别人弄丢密钥」和「代建」之间，
+// 同样不需要管理员的参与。
+async function keyAction(btn) {
+  const act = btn.dataset.kact;
+  const row = btn.closest('[data-kid]');
+  const kid = row ? Number(row.dataset.kid) : 0;
+  try {
+    if (act === 'toggle') {
+      const on = btn.textContent.trim() === '停用';
+      await api(`/api/keys/${kid}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !on }) });
+      toast(on ? '已停用' : '已启用');
+    }
+    await load();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* 发放 API 余额：调 /api/members/<id>/topup，成功后刷新页面里的余额。 */
+function openTopup() {
+  document.getElementById('tp-amount').value = '';
+  document.getElementById('tp-note').value = '';
+  document.getElementById('topup-modal').classList.add('open');
+  document.getElementById('tp-amount').focus();
+}
+
+function closeTopup() {
+  document.getElementById('topup-modal').classList.remove('open');
+}
+
+async function submitTopup(btn) {
+  const amount = Number(document.getElementById('tp-amount').value);
+  if (!amount) { toast('金额不能为 0', 'err'); return; }
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/members/${MEMBER_ID}/topup`, {
+      method: 'POST',
+      body: JSON.stringify({
+        amount,
+        note: document.getElementById('tp-note').value.trim(),
+      }),
+    });
+    closeTopup();
+    toast(`已发放，现余额 ${money(r.balance)}`);
+    await load();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function memberAction(act, btn) {
+  btn.disabled = true;
+  try {
+    if (act === 'toggle') {
+      const off = btn.textContent.trim() === '停用';
+      await api(`/api/members/${MEMBER_ID}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !off }) });
+      toast(off ? '成员已停用' : '成员已启用');
+      await load();
+      return;
+    }
+    if (act === 'del') {
+      if (!confirm('删除这个成员？他名下的密钥会一并失效。')) { btn.disabled = false; return; }
+      await api(`/api/members/${MEMBER_ID}`, { method: 'DELETE' });
+      toast('成员已删除');
+      location.href = '/admin#members';
+      return;
+    }
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+const money = v => fmtMoney(Number(v) || 0);
+
+/* 密钥列表：一行一把。管理员只读 + 停用——创建、重置、删除都要交给
+   成员自己，那三个动作要么产出明文，要么等价于换一把新的。 */
+function keyListHtml(keys) {
+  if (!keys.length) return '<div class="hint">这个成员还没有自己创建密钥。</div>';
+  return keys.map(k => `<div class="keyrow" data-kid="${k.id}">
+      <div class="keyrow-main">
+        <span class="mono">${esc(k.prefix)}…</span>
+        ${k.enabled ? '' : '<span class="pill off">停用</span>'}
+        ${k.kind === 'api' ? '<span class="pill">API 通道</span>' : ''}
+        ${k.note ? `<span class="sub">${esc(k.note)}</span>` : ''}
+      </div>
+      <div class="keyrow-act">
+        <button class="btn small ghost" data-kact="toggle">${k.enabled ? '停用' : '启用'}</button>
+      </div>
+    </div>`).join('');
+}
+function resetLabel(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// ============ 用量明细 ============
+// 同一张表里 token / 积分 / 元 三列并排，谁的用量就是谁的，不折算。
+// 占比跟着顶部切换的口径走，这样切换等于换排序的依据。
+function renderDetail(d) {
+  const body = document.getElementById('detail-body');
+  if (!body) return;
+  const view = ST.view;
+  const rows = (ST.detail === 'model'
+    ? (d.by_model_unit || []).slice()
+    : (d.by_provider || []).slice()).sort((a, b) => viewValue(b, view) - viewValue(a, view));
+  // 占比分母就取这一列自己的合计：billing 里的 cost 只覆盖 token 口径账号，
+  // 全是积分账号的成员切到「元」时那个分母是 0，整列都会变成「—」
+  const base = rows.reduce((sum, r) => sum + viewValue(r, view), 0);
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">还没有调用记录</td></tr>`;
+    return;
+  }
+
+  // 占比条按「这一行是谁」上色，不按口径上色。
+  // 原来三个口径分别给白/中灰/浅灰，切到「元」时整张表是同一根灰条，
+  // 谁都看不出哪一行的占比大。现在按厂商取 --p-dv-* 里的一档饱和色，
+  // 子行沿用父厂商的颜色但降低纯度，一眼能看出从属关系。
+  // 外面用 .meter > i（5px 轨道 + 绝对定位的 i），别套 .track，会被裁掉。
+  const provColor = (slug) => {
+    const order = ['workbuddy', 'qoder', 'claude', 'anthropic', 'openai', 'gemini'];
+    const i = order.indexOf(String(slug || '').toLowerCase());
+    return i >= 0 ? `var(--p-dv-${i + 4 > 7 ? 4 : i + 4})` : 'var(--p-dv-4)';
+  };
+  const meter = (v, color) => {
+    const w = Math.min(100, base > 0 ? (v / base) * 100 : 0);
+    return `<div class="meter"><i style="width:${w.toFixed(1)}%;
+      background:${color}"></i></div>`;
+  };
+
+  const cell = (r, isKid) => {
+    const v = viewValue(r, view);
+    const name = r.model || r.label || r.slug || '—';
+    // 子行没有 slug，颜色继承父行（下面 rows.forEach 里传下来）
+    const color = r.__color || provColor(r.slug);
+    // 子行是某个厂商下的模型，没有账号数这回事
+    const tag = (!isKid && ST.detail === 'provider')
+      ? `<span class="prov-tag" style="color:${provColor(r.slug)}">${
+          r.accounts} 个账号</span>` : '';
+    const exp = (!isKid && ST.detail === 'provider' && (r.models || []).length)
+      ? `<button class="expander" data-prov="${esc(r.slug)}">${
+          ST.openProv[r.slug] ? '▾' : '▸'}</button>` : '';
+    return `<tr class="${isKid ? 'kid' : 'grp'}">
+      <td>${exp}${esc(name)} ${tag}</td>
+      <td class="num" data-label="请求">${fmtInt(r.requests)}</td>
+      <td class="num" data-label="Token">${fmtCompact(r.tokens)}</td>
+      <td class="num" data-label="积分">${r.credits > 0 ? fmtCredit(r.credits) : '<span class="hint">—</span>'}</td>
+      <td class="num" data-label="元">${r.cost > 0 ? fmtMoney(r.cost) : '<span class="hint">—</span>'}</td>
+      <td class="num" data-label="占比">${meter(v, color)}<span style="font-size:11.5px;color:var(--ink-faint)">${
+        pctLabel(v, base)}</span></td>
+    </tr>`;
+  };
+
+  let html = '';
+  rows.forEach(r => {
+    html += cell(r, false);
+    if (ST.detail === 'provider' && ST.openProv[r.slug]) {
+      const c = provColor(r.slug);
+      (r.models || []).forEach(k => { k.__color = c; html += cell(k, true); });
+    }
+  });
+  // 没落到账号的请求：不进任何一行，只在这里说一声，免得请求数对不上
+  const unbound = (d.unbound || []).reduce((s, a) => s + a.requests, 0);
+  if (unbound > 0) {
+    body.innerHTML = html;
+    body.insertAdjacentHTML('beforeend', `<tr><td colspan="6"
+      style="padding-top:10px;color:var(--ink-faint);font-size:11.5px">
+      另有 ${fmtInt(unbound)} 次请求没落到任何账号（没可用账号或全部在冷却），
+      请求数只计进合计。</td></tr>`);
+    return;
+  }
+  body.innerHTML = html;
+}
+
+// ============ 调用明细 ============
+// 切换口径只是换个列加粗、换排序依据，数据本来就在手上。
+// 之前这里连数据一起重取，切一次等一次往返，看起来像卡住了。
+function paintCalls() {
+  const box = document.getElementById('calls');
+  if (!box) return;
+  const c = ST.calls;
+  if (!c.rows) return;
+
+  const accById = {};
+  (DATA.by_account || []).concat(DATA.unbound || [])
+    .forEach(a => { accById[a.account_id] = a; });
+
+  const view = ST.view;
+
+  // 三列并排，不用再单开一列重复当前口径：切换器把对应的那列加粗即可
+  const hi = k => (k === view ? ' style="font-weight:600;color:var(--ink)"' : '');
+  box.innerHTML = c.rows.length ? `<table class="stack">
+    <thead><tr><th>时间</th><th>账号</th><th>模型</th>
+      <th class="num${view === 'token' ? '' : ' opt'}">Token</th>
+      <th class="num${view === 'credit' ? '' : ' opt'}">积分</th>
+      <th class="num cost${view === 'cost' ? '' : ' cost-opt'}">元</th>
+      <th class="st">结果</th></tr></thead>
+    <tbody>${c.rows.map(r => {
+      const a = accById[Number(r.account_id)];
+      return `<tr>
+        <td class="mono when" data-label="时间" style="font-size:11.5px"><span class="d">${
+          new Date(r.created_at * 1000).toLocaleDateString('zh-CN',
+            { month: '2-digit', day: '2-digit' })}</span> <span class="t">${
+          new Date(r.created_at * 1000).toLocaleTimeString('zh-CN',
+            { hour: '2-digit', minute: '2-digit', hour12: false })}</span></td>
+        <td data-label="账号">${a ? esc(a.name) : (r.account_id ? '已删除账号 #' + r.account_id : '—')}</td>
+        <td data-label="模型">${esc(r.model || '—')}</td>
+        <td class="num${view === 'token' ? '' : ' opt'}" data-label="Token">${fmtInt(r.total_tokens)}</td>
+        <td class="num${view === 'credit' ? '' : ' opt'}" data-label="积分">${r.credits > 0 ? fmtCredit(r.credits) : '<span class="hint">—</span>'}</td>
+        <td class="num cost${view === 'cost' ? '' : ' cost-opt'}" data-label="元">${r.cost > 0 ? fmtMoney(r.cost) : '<span class="hint">—</span>'}</td>
+        <td class="st" data-label="结果">${r.status === 200 ? '<span class="pill ok">成功</span>'
+          : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`
+    : '<div class="empty">这段时间没有调用记录</div>';
+
+}
+
+// 取数：天数 / 页 / 每页条数变了才走这里。
+// 请求期间不清空旧表格——清空会让 .calls 从 620px 塌成 67px，
+// 下面的内容和分页条整体上跳再落回来，看着像页面在抽。
+// 只有第一次（还没有任何数据）才显示占位。
+async function renderCalls() {
+  const box = document.getElementById('calls');
+  const pager = document.getElementById('pager');
+  if (!box) return;
+  const c = ST.calls;
+  if (!c.rows || !c.rows.length) box.innerHTML = '<div class="empty">正在读取…</div>';
+  box.classList.add('loading');
+  try {
+    const qs = new URLSearchParams({
+      days: c.days, page: c.page, size: c.size,
+    });
+    const r = await api(`/api/members/${MEMBER_ID}/usage?${qs}`);
+    c.total = r.total; c.rows = r.rows; c.capped = r.capped;
+    c.cap = r.cap; c.pages = r.pages;
+  } catch (e) {
+    box.classList.remove('loading');
+    if (!c.rows || !c.rows.length) {
+      box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
+    return;
+  }
+  box.classList.remove('loading');
+  paintCalls();
+
+  // 分页条。超过封顶值就只说清「一共多少、只看到多少」，
+  // 不给出翻不到的页码
+  const pages = c.pages;
+  const over = c.total > c.cap;
+  pager.innerHTML = `
+    <span>共 ${fmtInt(c.total)} 条${over ? `，最多显示 ${fmtInt(c.cap)} 条` : ''}</span>
+    <span class="spacer"></span>
+    <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">每页
+      <select id="page-size">${SIZE_OPTS.map(n =>
+        `<option value="${n}" ${n === c.size ? 'selected' : ''}>${n} 条</option>`).join('')}
+      </select></label>
+    <button id="pg-prev" ${c.page <= 1 ? 'disabled' : ''}>上一页</button>
+    <span>${c.page} / ${pages}</span>
+    <button id="pg-next" ${c.page >= pages ? 'disabled' : ''}>下一页</button>`;
+}
+
+// ============ 事件 ============
+// 全部用事件委托挂在 #main 上：明细区、分页条每次都是新节点，
+// 单独给它们 addEventListener 会在第二次重绘后失效。
+let bound = false;
+function bindEvents() {
+  if (bound) return;
+  bound = true;
+  const main = document.getElementById('main');
+
+  main.addEventListener('click', e => {
+    const t = e.target.closest('[data-view],[data-detail],[data-days],[data-prov],'
+      + '#pg-prev,#pg-next,#btn-edit,[data-kact],[data-mact],[data-topup]');
+    if (!t || !main.contains(t)) return;
+
+    if (t.id === 'btn-edit') { location.href = '/admin#members'; return; }
+    if (t.dataset.topup !== undefined) { openTopup(); return; }
+
+    if (t.dataset.kact) { keyAction(t); return; }
+    if (t.dataset.mact) { memberAction(t.dataset.mact, t); return; }
+
+    if (t.dataset.view) {
+      ST.view = t.dataset.view;
+      document.querySelectorAll('[data-view]').forEach(x =>
+        x.classList.toggle('on', x.dataset.view === ST.view));
+      renderDetail(DATA);
+      paintCalls();
+      return;
+    }
+    if (t.dataset.detail) {
+      ST.detail = t.dataset.detail;
+      ST.openProv = {};
+      render();
+      return;
+    }
+    if (t.dataset.days !== undefined && t.tagName === 'BUTTON') {
+      ST.calls.days = Number(t.dataset.days);
+      ST.calls.page = 1;
+      document.querySelectorAll('[data-days]').forEach(x =>
+        x.classList.toggle('on', Number(x.dataset.days) === ST.calls.days));
+      renderCalls();
+      return;
+    }
+    if (t.dataset.prov) {
+      ST.openProv[t.dataset.prov] = !ST.openProv[t.dataset.prov];
+      renderDetail(DATA);
+      return;
+    }
+    if (t.id === 'pg-prev' && ST.calls.page > 1) {
+      ST.calls.page--; renderCalls(); return;
+    }
+    if (t.id === 'pg-next' && ST.calls.page < ST.calls.pages) {
+      ST.calls.page++; renderCalls(); return;
+    }
+  });
+
+  main.addEventListener('change', e => {
+    if (e.target.id === 'page-size') {
+      ST.calls.size = Number(e.target.value);
+      ST.calls.page = 1;
+      renderCalls();
+    }
+  });
+}
+
+document.addEventListener('themechange', () => { if (DATA) render(); });
+
+/* 发放弹窗自己一条事件：它挂在 #main 外面，拿不到那边的委托。 */
+document.getElementById('topup-modal').addEventListener('click', e => {
+  if (e.target.closest('[data-tpclose]')) { closeTopup(); return; }
+  if (e.target.closest('[data-tpsubmit]')) { submitTopup(e.target.closest('[data-tpsubmit]')); return; }
+  // 点遮罩空白处关掉
+  if (e.target.id === 'topup-modal') closeTopup();
+});
+
+/* 移动端抽屉菜单归 /assets/nav-mobile.js，后台与控制台共用；
+   这里只留页脚年份。 */
+const yearEl = document.getElementById('year');
+if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+document.getElementById('logout').addEventListener('click', async e => {
+  // 退出登录是 <a href="#">，不拦的话会先跳到页首再跳登录页
+  e.preventDefault();
+  try { await api('/api/logout', { method: 'POST' }); } catch { /* 清 cookie 失败也跳走 */ }
+  location.href = '/login';
+});
+load();
+</script>
+</body>
+</html>

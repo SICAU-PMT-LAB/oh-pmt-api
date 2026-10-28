@@ -74,7 +74,12 @@ class DisplayNameTest(unittest.TestCase):
 
     def test_other_models_untouched(self):
         self.assertEqual(display_name("gfmodel", "GLM-5.3-Flash"), "GLM-5.3-Flash")
-        self.assertEqual(display_name("dfmodel", "DeepSeek-Flash"), "DeepSeek-Flash")
+        self.assertEqual(display_name("gmodel", "GLM-5.3"), "GLM-5.3")
+
+    def test_deepseek_flash_unified_with_workbuddy(self):
+        """两家上游叫法不同，对外必须是同一个名字。"""
+        self.assertEqual(display_name("dfmodel", "DeepSeek-Flash"),
+                         "DeepSeek-V4.1-Flash")
 
     def test_unknown_falls_back_to_raw(self):
         self.assertEqual(display_name("zzz", "Whatever"), "Whatever")

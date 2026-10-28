@@ -215,7 +215,7 @@ def list_models(account: dict) -> list[dict]:
         elif isinstance(m, dict):
             mid = m.get("key") or m.get("id") or m.get("model") or m.get("name")
             if mid:
-                out.append({
+                entry = {
                     "id": mid,
                     "name": display_name(mid, m.get("display_name") or m.get("name") or mid),
                     "source": m.get("source") or "system",
@@ -223,7 +223,16 @@ def list_models(account: dict) -> list[dict]:
                     # 思考能力随目录一起带下来，请求侧要用它判断能发哪些档位
                     "is_reasoning": bool(m.get("is_reasoning")),
                     "thinking_config": m.get("thinking_config") or {},
-                })
+                }
+                if mid in MODEL_ALIASES:
+                    entry["aliases"] = MODEL_ALIASES[mid]
+                # 上下文与多模态能力补自本地表，上游接口不返回这两项
+                meta = MODEL_META.get(mid)
+                if meta:
+                    entry["context_length"] = meta[0]
+                    entry["max_output_tokens"] = meta[1]
+                    entry["supports_images"] = meta[2]
+                out.append(entry)
     return out
 
 
@@ -234,6 +243,37 @@ DISPLAY_NAMES = {
     "qfmodel": "Qwen-3.8-Flash",
     "kmodel_latest": "Kimi-K3",
     "kmodel": "Kimi-K2.8-Preview",
+    # 和 WorkBuddy 的同款模型对齐：两家上游叫法不同（这里上游是
+    # DeepSeek-Flash，那边是 DeepSeek-V4.1-Flash），对外只暴露一个名字，
+    # 客户端不必知道自己接的是哪家账号池。
+    "dfmodel": "DeepSeek-V4.1-Flash",
+}
+
+# 改名后仍要认得的旧名字，由 list_models 挂到目录条目上
+MODEL_ALIASES = {
+    "dfmodel": ["DeepSeek-Flash"],
+}
+
+# 上游的模型列表只给 key、显示名和思考档位，不给上下文长度与多模态能力。
+# 这几项成员在控制台要看（判断能不能放长文、能不能传图），所以按官方
+# 客户端缓存里的真实数值补一张本地表：(上下文, 最大输出, 是否支持图片)。
+# 缺失的模型不猜，前端显示「—」。
+MODEL_META = {
+    "auto":        (200000, 64000, True),
+    "ultimate":    (1000000, 128000, True),
+    "efficient":   (200000, 64000, True),
+    "fast":        (200000, 64000, True),
+    "smodel":      (180000, 64000, True),
+    "cmodel":      (180000, 64000, True),
+    "qmodel_38max": (180000, 64000, True),
+    "qfmodel":     (180000, 64000, True),
+    "kmodel_latest": (180000, 64000, True),
+    "kmodel":      (180000, 64000, True),
+    "gmodel":      (180000, 64000, True),
+    "gfmodel":     (1000000, 131072, True),
+    "dmodel":      (1000000, 128000, True),
+    "dfmodel":     (1000000, 128000, True),
+    "mmodel":      (180000, 128000, True),
 }
 
 
@@ -304,6 +344,11 @@ def resolve_model(name: str, catalog: dict) -> str | None:
             return mid
         if squash(mid) == target:
             return mid
+    # 显示名改过之后旧名字还要能用：客户端配置里存着的多半是旧名
+    for mid, meta in catalog.items():
+        for alias in meta.get("aliases") or []:
+            if squash(str(alias).strip().lower()) == target:
+                return mid
     return None
 
 

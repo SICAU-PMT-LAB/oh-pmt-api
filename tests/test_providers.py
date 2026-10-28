@@ -198,6 +198,49 @@ class LegacyDbAdoptionTest(unittest.TestCase):
         server._adopt_old_db()   # 两个文件都没有时不应报错
 
 
+class CatalogWithoutAccountsTest(unittest.TestCase):
+    """目录能不能列出来，不应该取决于当时有没有空闲账号。
+
+    WorkBuddy 的 CATALOG 是本地静态表，账号全在冷却或刚接入未同步时
+    仍然要能列出模型，否则成员页上这家厂商的模型会凭空消失、已经配好的
+    白名单也变成选不中的死值。Qoder 要拿 job token 才能问接口，没账号
+    就只能为空。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.store = Store(self.tmp.name)
+        self.old_store = server.STORE
+        server.STORE = self.store
+        server.clear_model_cache()
+
+    def tearDown(self):
+        server.STORE = self.old_store
+        server.clear_model_cache()
+        os.unlink(self.tmp.name)
+
+    def test_workbuddy_catalog_needs_no_account(self):
+        self.assertEqual(self.store.list_accounts(), [])
+        catalog = server.all_models()
+        wb = [k for k, v in catalog.items()
+              if any(r["provider"] == "workbuddy" for r in v["routes"])]
+        self.assertTrue(wb, "没有账号时 WorkBuddy 的静态目录也要能列出来")
+
+    def test_static_catalog_not_duplicated_per_region(self):
+        # CATALOG 每个区域都一样，按区域展开会出现两条同厂商路由
+        catalog = server.all_models()
+        for mid, entry in catalog.items():
+            slugs = [r["provider"] for r in entry["routes"]]
+            self.assertEqual(len(slugs), len(set(slugs)),
+                             f"{mid} 同一厂商出现了多条路由: {slugs}")
+
+    def test_qoder_catalog_still_needs_account(self):
+        # Qoder 没账号时列不出模型，这是协议决定的，不是 bug
+        self.assertTrue(providers.get("qoder").catalog_needs_account)
+        self.assertFalse(providers.get("workbuddy").catalog_needs_account)
+
+
 class AccountViewProviderTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -358,14 +401,18 @@ class WorkbuddyAdapterTest(unittest.TestCase):
 
 
 class WorkbuddyQuotaShapeTest(unittest.TestCase):
-    """额度分组要归成三块：套餐 = plan_base + plan_bonus，赠送 = addon + benefit。"""
+    """额度分组要归成三块：套餐 = plan_base + plan_bonus，赠送 = addon + benefit。
+
+    上游的 TotalCredits 是「还剩多少」而不是总量，实测两次快照都满足
+    base_remaining + addon_remaining == TotalCredits。
+    """
 
     def test_groups_are_folded(self):
         import workbuddy
         payload = {
             "code": 0,
             "data": {
-                "TotalCredits": "2100",
+                "TotalCredits": "1950",
                 "SubscriptionPackageName": "体验版",
                 "CreditGroups": [
                     {"Kind": "plan_base", "CycleTotalCapacity": "500",
@@ -388,9 +435,42 @@ class WorkbuddyQuotaShapeTest(unittest.TestCase):
         self.assertEqual(q["addon_total"], 1500)
         self.assertEqual(q["addon_used"], 50)
         self.assertEqual(q["total"], 2100)
-        self.assertEqual(q["used"], 150)
         self.assertEqual(q["remaining"], 1950)
+        self.assertEqual(q["used"], 150)
+        self.assertEqual(q["base_remaining"], 500)
+        self.assertEqual(q["addon_remaining"], 1450)
         self.assertEqual(q["plan"], "体验版")
+
+    def test_remaining_is_not_double_subtracted(self):
+        """TotalCredits 已经是剩余量，再减一次 used 会少算一个已用量。"""
+        import workbuddy
+        payload = {"code": 0, "data": {
+            "TotalCredits": "2098.26",
+            "CreditGroups": [
+                {"Kind": "plan_base", "CycleTotalCapacity": "500",
+                 "CycleUsedCapacity": "1.74"},
+                {"Kind": "addon", "CycleTotalCapacity": "1600",
+                 "CycleUsedCapacity": "0"},
+            ]}}
+        import json as _json
+        with mock.patch.object(workbuddy, "_request",
+                               return_value=(200, _json.dumps(payload).encode())):
+            q = workbuddy.fetch_quota({"region": "cn", "access_token": "t"})
+        self.assertAlmostEqual(q["remaining"], 2098.26)
+        self.assertAlmostEqual(q["total"], 2100.0)
+        self.assertAlmostEqual(q["used"], 1.74)
+
+    def test_missing_total_falls_back_to_capacity(self):
+        import workbuddy
+        payload = {"code": 0, "data": {"CreditGroups": [
+            {"Kind": "plan_base", "CycleTotalCapacity": "500",
+             "CycleUsedCapacity": "100"}]}}
+        import json as _json
+        with mock.patch.object(workbuddy, "_request",
+                               return_value=(200, _json.dumps(payload).encode())):
+            q = workbuddy.fetch_quota({"region": "cn", "access_token": "t"})
+        self.assertAlmostEqual(q["total"], 500.0)
+        self.assertAlmostEqual(q["remaining"], 400.0)
 
     def test_upstream_error_surfaces(self):
         import workbuddy
@@ -523,7 +603,11 @@ class WorkbuddyRejectionTest(unittest.TestCase):
 
 
 class NoAccountReasonTest(unittest.TestCase):
-    """503 的措辞要能区分「没配」「停用」「冷却中」。"""
+    """503 的措辞要能区分「没配」与「冷却中」，且不能报出厂商。
+
+    这段文字作为错误 message 回给 API 调用方，厂商名、区域、上游错误原文
+    都是账号池的构成信息，只能写在管理端。
+    """
 
     def _reason(self, rows, region="cn"):
         import providers
@@ -535,20 +619,28 @@ class NoAccountReasonTest(unittest.TestCase):
             return server.Handler._no_account_reason(providers.get("workbuddy"), region)
 
     def test_no_accounts_at_all(self):
-        self.assertIn("没有账号", self._reason([]))
+        text = self._reason([])
+        self.assertIn("没有可用账号", text)
+        self.assertNotIn("WorkBuddy", text)
+        self.assertNotIn("国内版", text)
 
-    def test_all_disabled(self):
-        self.assertIn("停用", self._reason(
-            [{"id": 1, "enabled": 0, "cooldown_until": 0, "last_error": ""}]))
+    def test_all_disabled_looks_the_same_as_missing(self):
+        """停用与没接入对外同一种说法：账号存在与否也是账号池信息。"""
+        self.assertEqual(
+            self._reason([{"id": 1, "enabled": 0, "cooldown_until": 0,
+                           "last_error": ""}]),
+            self._reason([]))
 
     def test_all_cooling_down_reports_remaining_time(self):
         import time
         text = self._reason([{"id": 1, "enabled": 1,
                               "cooldown_until": time.time() + 40,
                               "last_error": "upstream 400: 11128"}])
-        self.assertIn("冷却", text)
-        self.assertIn("秒后恢复", text)
-        self.assertIn("11128", text)
+        self.assertIn("繁忙", text)
+        self.assertIn("秒后重试", text)
+        # 上游错误原文可能带 URL、错误码和渠道名，不往调用方回
+        self.assertNotIn("11128", text)
+        self.assertNotIn("WorkBuddy", text)
 
 
 class PickAccountConcurrencyTest(unittest.TestCase):

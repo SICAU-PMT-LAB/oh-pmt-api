@@ -1,0 +1,1300 @@
+/* Prometheus 站点样式。
+   设计语言与 opencode.ai 对齐：IBM Plex Mono 全站等宽、67.5rem 居中竖栏、
+   1px hairline 分区、无圆角装饰。明暗两套通过 prefers-color-scheme 切换，
+   与 macOS / Windows 的系统主题联动。
+
+   变量分两层：
+     --color-*   语义色，页面级主题只改这一层
+     --space-*   间距刻度，直接照抄 opencode 的 4px 基数
+*/
+
+/* ---------------- 字体 ---------------- */
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("IBM Plex Mono"), local("IBMPlexMono"),
+       url("/assets/fonts/IBMPlexMono-Regular-Latin1-BsnL3gsb.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 450;
+  font-display: swap;
+  src: local("IBM Plex Mono Text"), local("IBMPlexMono-Text"),
+       url("/assets/fonts/IBMPlexMono-Text-Latin1-CBqqOVbe.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local("IBM Plex Mono Medm"), local("IBMPlexMono-Medm"),
+       url("/assets/fonts/IBMPlexMono-Medium-Latin1-DBHUbp12.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: local("IBM Plex Mono SmBld"), local("IBMPlexMono-SmBld"),
+       url("/assets/fonts/IBMPlexMono-SemiBold-Latin1-iYs1QkgK.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local("IBM Plex Mono Bold"), local("IBMPlexMono-Bold"),
+       url("/assets/fonts/IBMPlexMono-Bold-Latin1-K_Zucu9w.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local("IBM Plex Mono Italic"), local("IBMPlexMono-Italic"),
+       url("/assets/fonts/IBMPlexMono-Italic-Latin1-BEGMiYkX.woff2") format("woff2");
+}
+
+/* ---------------- 基础 ---------------- */
+
+:root {
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  --color-bg: #ffffff;
+  --color-bg-surface: #f5f5f7;
+  --color-bg-elevated: #ffffff;
+
+  --color-text: #1d1d1f;
+  --color-text-secondary: #424245;
+  --color-text-muted: #6e6e73;
+  --color-text-disabled: #86868b;
+
+  --color-accent: #007aff;
+  --color-accent-hover: #0056b3;
+  --color-success: #30d158;
+  --color-warning: #ff9f0a;
+  --color-danger: #ff3b30;
+  --color-border: #d2d2d7;
+  --color-border-muted: #e5e5ea;
+
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-hover);
+  --color-primary-text: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0c0c0e;
+    --color-bg-surface: #161618;
+    --color-bg-elevated: #1c1c1f;
+    --color-text: #ffffff;
+    --color-text-secondary: #c7c7cc;
+    --color-text-muted: #a1a1a6;
+    --color-text-disabled: #68686f;
+    --color-border: #38383a;
+    --color-border-muted: #2c2c2e;
+    --color-danger: #ff453a;
+  }
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+* { margin: 0; }
+
+html {
+  line-height: 1.5;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+img, picture, video, canvas, svg { display: block; max-width: 100%; }
+input, button, textarea, select { font: inherit; }
+
+p, h1, h2, h3, h4, h5, h6 { overflow-wrap: break-word; }
+p { text-wrap: pretty; }
+h1, h2, h3, h4, h5, h6 { text-wrap: balance; }
+
+:root {
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+               Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-sans: var(--font-mono);
+
+  --space-1: 0.25rem;
+  --space-1-5: 0.375rem;
+  --space-2: 0.5rem;
+  --space-2-5: 0.625rem;
+  --space-3: 0.75rem;
+  --space-3-5: 0.875rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --font-size-2xs: 0.6875rem;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.9375rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+  --font-size-5xl: 3rem;
+
+  --border-radius-sm: 0.1875rem;
+  --border-radius-md: 0.3125rem;
+  --border-radius-lg: 0.5rem;
+}
+
+::selection {
+  background: var(--color-site-interactive);
+  color: var(--color-text-strong);
+}
+@media (prefers-color-scheme: dark) {
+  ::selection {
+    background: var(--color-site-interactive);
+    color: var(--color-text-inverted);
+  }
+}
+
+[hidden] { display: none !important; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ---------------- 站点主题 ---------------- */
+
+[data-page="site"] {
+  /* 黑白单色：与 opencode.ai 一致，纸白底、灰线、深墨字，
+     不用彩色强调，视觉重心交给字号与留白。 */
+  --color-site-bg: #ffffff;
+  --color-site-bg-weak: #f5f5f7;
+  --color-site-bg-weak-hover: #ececee;
+  --color-site-bg-strong: #1d1d1f;
+  --color-site-bg-strong-hover: #000000;
+  --color-site-interactive: #e8e8ea;
+  --color-site-interactive-weaker: #f2f2f4;
+  --color-text: #6e6e73;
+  --color-text-weak: #86868b;
+  --color-text-weaker: #c7c7cc;
+  --color-text-strong: #1d1d1f;
+  --color-text-inverted: #ffffff;
+  --color-border: #d2d2d7;
+  --color-border-weak: rgba(0, 0, 0, 0.10);
+  --color-icon: #86868b;
+  /* 顶栏高度：移动端菜单靠它贴到顶栏下沿。挂在 body 上而不是顶栏自己身上，
+     因为菜单是顶栏的兄弟节点。 */
+  --site-header-h: 80px;
+  --gold: #1d1d1f;
+  --gold-soft: #f2f2f4;
+  --gold-line: rgba(0, 0, 0, 0.14);
+  color-scheme: light;
+}
+
+/* 深色：手动选了 dark 就直接生效；没选过则跟随系统。
+   两条选择器分开写，避免 @media 里的规则被前面的同优先级规则盖掉。 */
+:root[data-theme="dark"] [data-page="site"] {
+  /* 黑底白字，对应 opencode 的深色档 */
+  --color-site-bg: #0c0c0e;
+  --color-site-bg-weak: #161618;
+  --color-site-bg-weak-hover: #1c1c1f;
+  --color-site-bg-strong: #ffffff;
+  --color-site-bg-strong-hover: #ffffff;
+  --color-site-interactive: rgba(255, 255, 255, 0.10);
+  --color-site-interactive-weaker: rgba(255, 255, 255, 0.05);
+  --color-text: #a1a1a6;
+  --color-text-weak: #86868b;
+  --color-text-weaker: #48484a;
+  --color-text-strong: #ffffff;
+  --color-text-inverted: #0c0c0e;
+  --color-border: #38383a;
+  --color-border-weak: rgba(255, 255, 255, 0.12);
+  --color-icon: #86868b;
+  --gold: #ffffff;
+  --gold-soft: rgba(255, 255, 255, 0.10);
+  --gold-line: rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
+}
+:root[data-theme="light"] [data-page="site"] { color-scheme: light; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [data-page="site"] {
+    /* 黑底白字，对应 opencode 的深色档 */
+    --color-site-bg: #0c0c0e;
+    --color-site-bg-weak: #161618;
+    --color-site-bg-weak-hover: #1c1c1f;
+    --color-site-bg-strong: #ffffff;
+    --color-site-bg-strong-hover: #ffffff;
+    --color-site-interactive: rgba(255, 255, 255, 0.10);
+    --color-site-interactive-weaker: rgba(255, 255, 255, 0.05);
+    --color-text: #a1a1a6;
+    --color-text-weak: #86868b;
+    --color-text-weaker: #48484a;
+    --color-text-strong: #ffffff;
+    --color-text-inverted: #0c0c0e;
+    --color-border: #38383a;
+    --color-border-weak: rgba(255, 255, 255, 0.12);
+    --color-icon: #86868b;
+    --gold: #ffffff;
+    --gold-soft: rgba(255, 255, 255, 0.10);
+    --gold-line: rgba(255, 255, 255, 0.16);
+    color-scheme: dark;
+  }
+}
+
+/* html 的底色必须跟着主题走：body 和 main 都是透明的，
+   真正垫在最下面的就是 html。它要是固定成深色，浅色主题下
+   圆形扩散到边缘就会露出一圈黑。 */
+html { background: var(--color-site-bg, #ffffff); }
+:root[data-theme="dark"] { --color-site-bg: #0c0c0e; }
+:root[data-theme="light"] { --color-site-bg: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --color-site-bg: #0c0c0e; }
+}
+
+body[data-page="site"] {
+  /* 底色留在 html 上，body 透明，动效背景才能露出来 */
+  background: transparent;
+}
+
+[data-page="site"] {
+  --padding: 5rem;
+  --vertical-padding: 4rem;
+  display: flex;
+  gap: var(--vertical-padding);
+  flex-direction: column;
+  color: var(--color-text);
+  padding-bottom: 5rem;
+  min-height: 100vh;
+}
+
+@media (max-width: 60rem) {
+  [data-page="site"] {
+    --padding: 1.5rem;
+    --vertical-padding: 3rem;
+    font-size: 15px;
+  }
+}
+
+[data-page="site"] a {
+  color: var(--color-text-strong);
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  text-decoration-thickness: 1px;
+}
+
+[data-page="site"] p {
+  line-height: 200%;
+}
+@media (max-width: 60rem) {
+  [data-page="site"] p { line-height: 180%; }
+}
+
+[data-slot="br"] { display: block; }
+@media (max-width: 60rem) {
+  [data-slot="br"] { display: none; }
+}
+
+/* ---------------- 容器与顶栏 ---------------- */
+
+[data-component="container"] {
+  max-width: 67.5rem;
+  margin: 0 auto;
+  border: 1px solid var(--color-border-weak);
+  border-top: none;
+  width: 100%;
+}
+@media (max-width: 65rem) {
+  [data-component="container"] { border: none; }
+}
+
+[data-component="top"] {
+  padding: 24px var(--padding);
+  height: 80px;
+  min-height: 80px;
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: color-mix(in srgb, var(--color-site-bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--color-border-weak);
+  z-index: 10;
+}
+
+[data-component="top"] .logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--color-text-strong);
+}
+
+/* 字标：全大写的 PROMETHEUS API，滚动时收成 PMT API。
+
+   折叠靠逐字母收缩宽度实现：非保留字母的 width 过渡到 0，
+   P/M/T 自然靠拢。宽度必须参与动画（不能用 transform），
+   因为字标在 flex 行里，只有占位真的变窄，右边导航才会跟着左移。
+
+   每个字母按序号错开 18ms，收起来像一串骨牌依次让位，
+   比整排同时收缩更有加速度的味道。 */
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-text-strong);
+  gap: 0;
+  transition: gap 960ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wordmark .wm-letter {
+  /* inline-block + 明确的 width 才能逐帧插值；overflow 免得字母被压扁 */
+  display: inline-block;
+  overflow: hidden;
+  /* 1ch = 等宽字体里一个字符的推进宽度，正好是字母原本占的横向空间。
+     必须写明确值：width: auto 无法插值，过渡会退化成瞬间跳变。 */
+  width: 1ch;
+  text-align: left;
+  transition:
+    width 960ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 480ms ease;
+  /* 收拢时用长一点的回弹感；展开时同样的曲线反过来，读起来更顺。
+     错峰也跟着主时长翻倍，字母之间的先后关系才不会显得拥挤。 */
+  transition-delay: calc(var(--i, 0) * 36ms);
+}
+
+.wordmark[data-folded] .wm-letter:not([data-keep]) {
+  width: 0;
+  opacity: 0;
+}
+
+/* 折叠态下 P/M/T 之间补一点空隙，否则三个字母会挤成一坨。
+   用 flex 的 gap 统一控制：展开态 gap 为 0（字母间本来就靠字距），
+   折叠时过渡到 0.08em。这样空隙不会挂到某个具体字母上，
+   P 和 R 之间也不会有残留边距。 */
+.wordmark[data-folded] { gap: 0.08em; }
+
+/* API 后缀：名称的一部分，折叠时保留，不参与宽度动画 */
+.wordmark .wm-suffix {
+  color: var(--color-text-weak);
+  font-weight: 500;
+  white-space: pre;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordmark,
+  .wordmark .wm-letter { transition: none; }
+}
+
+/* Data 页与 Docs 页的顶栏比首页矮，字标相应收小 */
+[data-slot="brand"] .wordmark,
+.site-header .wordmark { font-size: 14px; }
+
+[data-component="nav-desktop"] ul {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 32px;
+  list-style: none;
+  padding: 0;
+}
+@media (max-width: 55rem) {
+  [data-component="nav-desktop"] ul { gap: 24px; }
+}
+[data-component="nav-desktop"] li { display: inline-block; }
+[data-component="nav-desktop"] li a {
+  text-decoration: none;
+  color: var(--color-text);
+}
+[data-component="nav-desktop"] li a:hover {
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  text-decoration-thickness: 1px;
+}
+[data-component="nav-desktop"] li a[aria-current="page"] {
+  color: var(--color-text-strong);
+  font-weight: 500;
+}
+
+/* 顶栏右侧一组：主题、登录、汉堡。主体导航在手机上整块隐藏，
+   这一组仍然留着，否则手机上无法切明暗。 */
+[data-slot="top-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+@media (max-width: 40rem) {
+  [data-slot="top-actions"] { gap: 4px; }
+}
+[data-slot="cta-button"] {
+  background: var(--color-site-bg-strong);
+  color: var(--color-text-inverted) !important;
+  /* 图标在右，所以左右内边距对调：贴图标一侧留窄一点，
+     贴文字一侧留宽，整体视觉重心才不会偏。 */
+  padding: 8px 10px 8px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  text-decoration: none !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+[data-slot="cta-button"]:hover { background: var(--color-site-bg-strong-hover); }
+@media (max-width: 55rem) {
+  [data-slot="cta-button"] { display: none; }
+}
+
+/* 明暗切换：形态沿用登录页那颗胶囊按钮（毛玻璃、圆角、40px），
+   切换时用 View Transition 做一次从按钮位置扩散的圆形揭示。 */
+[data-slot="theme-toggle"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--color-border-weak);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-site-bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+[data-slot="theme-toggle"]:hover {
+  background: var(--color-site-bg-weak);
+  color: var(--color-text-strong);
+}
+[data-slot="theme-toggle"] svg {
+  width: 17px;
+  height: 17px;
+  transition: transform 400ms cubic-bezier(0.22, 0.9, 0.28, 1.04);
+}
+[data-slot="theme-toggle"]:active svg { transform: scale(0.86); }
+
+/* View Transition 的圆形揭示：用按钮中心作为扩散原点 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+/* 新主题快照必须是覆盖一切的那一层，否则站点里的 backdrop（z-index 0）
+   和内容层（z-index 1）会从圆形扩散的缝里透出来。 */
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2147483646; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="theme-toggle"] svg { transition: none; }
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+}
+
+[data-component="nav-mobile"] { display: none; }
+@media (max-width: 40rem) {
+  [data-component="nav-desktop"] { display: none; }
+  [data-component="nav-mobile"] { display: flex; }
+}
+/* 汉堡按钮：官网与后台共用这套尺寸与两枚图标的换形。
+   两种写法都能命中——官网用 data-component，后台用 .nav-toggle 类。 */
+[data-component="nav-mobile-toggle"],
+.nav-toggle {
+  position: relative;
+  border: none;
+  background: none;
+  outline: none;
+  height: 40px;
+  width: 40px;
+  padding: 0;
+  cursor: pointer;
+  margin-right: -8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-icon);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+[data-component="nav-mobile-toggle"]:hover,
+.nav-toggle:hover {
+  background: color-mix(in srgb, var(--color-site-bg-weak) 60%, transparent);
+  color: var(--color-text-strong);
+}
+[data-component="nav-mobile-toggle"]:focus-visible,
+.nav-toggle:focus-visible {
+  outline: 2px solid var(--color-text-strong);
+  outline-offset: 2px;
+}
+[data-component="nav-mobile-toggle"] svg,
+.nav-toggle svg {
+  /* 两枚图标叠在同一个中心：绝对定位对 flex / grid 容器都成立，
+     后台面板把自己的 .nav-toggle 写成 inline-flex 时也不会并排成两枚 */
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  color: currentColor;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+[data-component="nav-mobile-toggle"] .icon-close,
+.nav-toggle .icon-close {
+  opacity: 0;
+  transform: rotate(-45deg) scale(0.7);
+}
+[data-component="nav-mobile-toggle"][aria-expanded="true"] .icon-hamburger,
+.nav-toggle[aria-expanded="true"] .icon-hamburger {
+  opacity: 0;
+  transform: rotate(45deg) scale(0.7);
+}
+[data-component="nav-mobile-toggle"][aria-expanded="true"] .icon-close,
+.nav-toggle[aria-expanded="true"] .icon-close {
+  opacity: 1;
+  transform: none;
+}
+
+/* 菜单本体。
+
+   z-index 必须写：它是 position: fixed 的浮层，而 .pmt-backdrop-grid 也是
+   fixed 且排在它后面，不显式抬升就会压住刚打开的第一屏（演示视频那一块）。
+   顶栏是 10，菜单取 9 贴着它下沿，两者不重叠。 */
+[data-component="nav-mobile-menu-list"] {
+  position: fixed;
+  background: color-mix(in srgb, var(--color-site-bg) 96%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  /* 顶栏高度各页不同（官网 80px、文档页 62px、后台窄屏 64px），
+     由各页写 --site-header-h，菜单贴在顶栏下沿 */
+  top: var(--site-header-h, 80px);
+  left: 0;
+  right: 0;
+  /* 旧值是 100vh，从顶栏下方再铺一屏会多出一截，页面被撑出滚动条 */
+  bottom: 0;
+  height: auto;
+  z-index: 9;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--color-border-weak);
+}
+[data-component="nav-mobile-menu-list"] ul {
+  list-style: none;
+  padding: 0.5rem 0 2rem;
+}
+[data-component="nav-mobile-menu-list"] li a {
+  text-decoration: none;
+  font-size: 1rem;
+  line-height: 1.4;
+  padding: 1rem 1.5rem;
+  display: block;
+  color: var(--color-text);
+}
+[data-component="nav-mobile-menu-list"] li a:hover {
+  background: transparent;
+  color: var(--color-text-strong);
+}
+[data-component="nav-mobile-menu-list"] li a[aria-current="page"] {
+  color: var(--color-text-strong);
+  font-weight: 500;
+}
+
+/* 菜单开着时背后的内容不跟着滚。锁在 html 上而不是 body：
+   后台与官网的 sticky 顶栏都挂在 body 里，动 body 会让顶栏一起位移。 */
+html[data-nav-open] { overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="nav-mobile-toggle"] svg,
+  .nav-toggle svg { transition: none; }
+}
+
+/* ---------------- Hero ---------------- */
+
+[data-component="hero"] {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  padding: calc(var(--vertical-padding) * 1.5) var(--padding);
+}
+@media (max-width: 30rem) {
+  [data-component="hero"] {
+    padding: var(--vertical-padding) var(--padding);
+  }
+}
+
+[data-slot="hero-copy"] h1 {
+  font-size: 38px;
+  color: var(--color-text-strong);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+@media (max-width: 60rem) {
+  [data-slot="hero-copy"] h1 { font-size: 22px; }
+}
+
+/* 首页的标题比内页大一号：它是整个站点的门面，
+   Plan / Data 的 h1 保持 38px 以免把版面撑开。 */
+main[data-page="opencode"] [data-slot="hero-copy"] h1 {
+  /* 内容区最宽 67.5rem 减去左右各 5rem 内边距，标题 18 个等宽字符
+     大约要占 10.8em，所以 78px 是单行放得下的上限。 */
+  font-size: clamp(34px, 5.2vw, 78px);
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+  margin-bottom: 16px;
+}
+@media (max-width: 60rem) {
+  main[data-page="opencode"] [data-slot="hero-copy"] h1 {
+    font-size: clamp(28px, 6.6vw, 46px);
+    letter-spacing: -0.02em;
+  }
+}
+[data-slot="hero-copy"] p {
+  color: var(--color-text);
+  margin-bottom: 32px;
+  max-width: 82%;
+}
+@media (max-width: 50rem) {
+  [data-slot="hero-copy"] p { max-width: 100%; }
+}
+[data-slot="hero-copy"] a.cta,
+[data-component="what"] a.cta,
+[data-component="zen-cta"] a.cta {
+  background: var(--color-site-bg-strong);
+  padding: 8px 12px 8px 20px;
+  color: var(--color-text-inverted);
+  border: none;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  width: fit-content;
+  gap: 12px;
+  text-decoration: none;
+}
+[data-slot="hero-copy"] a.cta:hover,
+[data-component="what"] a.cta:hover,
+[data-component="zen-cta"] a.cta:hover {
+  background: var(--color-site-bg-strong-hover);
+  text-decoration: none;
+}
+
+/* ---------------- 安装命令 ---------------- */
+
+[data-slot="installation"] {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+[data-component="tabs"] [data-slot="tablist"] {
+  display: flex;
+  gap: 40px;
+  align-items: center;
+  border: 1px solid var(--color-border-weak);
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  background: transparent;
+  padding: 0 20px;
+}
+@media (max-width: 60rem) {
+  [data-component="tabs"] [data-slot="tablist"] {
+    gap: 32px;
+    overflow-x: auto;
+    width: 100%;
+  }
+}
+[data-component="tabs"] [data-slot="tab"] {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 16px 0;
+  margin: 0;
+  cursor: pointer;
+  color: var(--color-text-weak);
+  line-height: 1;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+[data-component="tabs"] [data-slot="tab"][aria-selected="true"] {
+  color: var(--color-text-strong);
+  border-bottom-color: var(--color-site-bg-strong);
+}
+[data-component="tabs"] [data-slot="panels"] {
+  background: transparent;
+  border: 1px solid var(--color-border-weak);
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  padding: 16px;
+}
+[data-component="tabs"] [data-slot="panel"] {
+  display: block;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 16px;
+  font-family: var(--font-mono);
+  width: 100%;
+}
+[data-slot="command"] {
+  all: unset;
+  display: flex;
+  max-width: 100%;
+  cursor: pointer;
+  align-items: center;
+  color: var(--color-text);
+  gap: 16px;
+  padding: 8px 16px 8px 8px;
+  border-radius: 4px;
+}
+[data-slot="command"]:hover { background: var(--color-site-bg-weak-hover); }
+[data-slot="command-script"] {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  vertical-align: middle;
+  scrollbar-width: thin;
+}
+[data-slot="highlight"] {
+  font-weight: 500;
+  color: var(--color-text-strong);
+}
+[data-component="copy-status"] [data-slot="copy"] {
+  display: block;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-weaker);
+}
+[data-component="copy-status"] [data-slot="check"] {
+  display: none;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-strong);
+}
+[data-copied] [data-component="copy-status"] [data-slot="copy"] { display: none; }
+[data-copied] [data-component="copy-status"] [data-slot="check"] { display: block; }
+
+/* ---------------- 视频 ---------------- */
+
+[data-component="video"] {
+  border-top: 1px solid var(--color-border-weak);
+}
+[data-component="video"] video {
+  width: 100%;
+  height: auto;
+  display: block;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+}
+
+[data-component="video-placeholder"] {
+  border-top: 1px solid var(--color-border-weak);
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.06), transparent 55%),
+    #0a0a0a;
+  overflow: hidden;
+}
+[data-component="video-placeholder"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(to right, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 64px);
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 20%, transparent 100%);
+}
+[data-component="video-placeholder"] .vp-inner {
+  position: relative;
+  text-align: center;
+  color: #8f8b86;
+  font-size: 12px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+[data-component="video-placeholder"] .vp-mark {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: #2f2c29;
+  margin-bottom: 18px;
+}
+[data-component="video-placeholder"] .vp-play {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 1px solid #3a3733;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  color: #6d6862;
+}
+
+/* ---------------- 章节 ---------------- */
+
+[data-slot="section-title"] {
+  margin-bottom: 24px;
+  max-width: 100%;
+}
+[data-slot="section-title"] div {
+  display: flex;
+  gap: 12px;
+}
+[data-slot="section-title"] span {
+  color: var(--color-icon);
+  line-height: 200%;
+}
+[data-slot="section-title"] h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-strong);
+  margin-bottom: 12px;
+}
+[data-slot="section-title"] p {
+  margin-bottom: 12px;
+  color: var(--color-text);
+}
+[data-slot="section-title"] div > p > strong {
+  font-weight: 500;
+  color: var(--color-text-strong);
+}
+
+[data-component="what"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: var(--vertical-padding) var(--padding);
+  color: var(--color-text);
+}
+[data-component="what"] a.cta { margin-top: 40px; }
+[data-component="what"] ul { padding: 0; }
+[data-component="what"] li {
+  list-style: none;
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
+  line-height: 200%;
+}
+[data-component="what"] li:last-child { margin-bottom: 0; }
+[data-component="what"] li > span { color: var(--color-icon); }
+[data-component="what"] li strong {
+  font-weight: 500;
+  color: var(--color-text-strong);
+  margin-right: 12px;
+}
+
+[data-component="zen-cta"] {
+  border-top: 1px solid var(--color-border-weak);
+  display: flex;
+  padding: var(--vertical-padding) var(--padding);
+}
+[data-slot="zen-cta-copy"] strong {
+  color: var(--color-text-strong);
+  font-weight: 700;
+  margin-bottom: 16px;
+  display: block;
+}
+[data-slot="zen-cta-copy"] p {
+  color: var(--color-text);
+  margin-bottom: 24px;
+  max-width: 90%;
+}
+@media (max-width: 50rem) {
+  [data-slot="zen-cta-copy"] p { max-width: 100%; }
+}
+
+[data-component="privacy"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: var(--vertical-padding) var(--padding);
+}
+[data-component="privacy"] [data-slot="privacy-title"] h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-strong);
+  margin-bottom: 12px;
+}
+[data-component="privacy"] [data-slot="privacy-title"] div {
+  display: flex;
+  gap: 12px;
+}
+[data-component="privacy"] [data-slot="privacy-title"] span {
+  color: var(--color-icon);
+  line-height: 200%;
+}
+
+/* ---------------- 数字插图 ---------------- */
+
+[data-component="growth"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: var(--vertical-padding) var(--padding);
+}
+[data-component="growth-stats"] {
+  margin-top: 48px;
+  margin-left: 40px;
+  display: flex;
+  gap: 64px;
+}
+@media (max-width: 60rem) {
+  [data-component="growth-stats"] { gap: 56px; }
+}
+@media (max-width: 50rem) {
+  [data-component="growth-stats"] { gap: 48px; }
+}
+@media (max-width: 40rem) {
+  [data-component="growth-stats"] { display: none; }
+}
+[data-component="growth-stat"] {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  text-align: left;
+  width: 100%;
+}
+[data-component="growth-stat"] .stat-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+[data-component="growth-stat"] .stat-caption strong {
+  color: var(--color-text-strong);
+  font-weight: 500;
+}
+[data-component="growth-stat"] .stat-caption figure {
+  font-size: 14px;
+  color: var(--color-text-weak);
+}
+@media (max-width: 70rem) {
+  [data-component="growth-stat"] .stat-caption figure { display: none; }
+}
+[data-component="stat-illustration"] {
+  width: 100%;
+  display: block;
+}
+[data-component="stat-illustration"] svg {
+  margin: 0;
+  width: 100%;
+  height: auto;
+  max-height: 264px;
+}
+
+/* ---------------- FAQ ---------------- */
+
+[data-component="faq"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: var(--vertical-padding) var(--padding);
+}
+[data-component="faq"] ul {
+  padding: 0;
+}
+[data-component="faq"] li {
+  list-style: none;
+  margin-bottom: 24px;
+  line-height: 200%;
+}
+[data-slot="faq-question"] {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--color-text-strong);
+  font-weight: 500;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  align-items: start;
+  min-height: 24px;
+  text-align: left;
+  width: 100%;
+}
+[data-slot="faq-icon-plus"],
+[data-slot="faq-icon-minus"] {
+  flex-shrink: 0;
+  color: var(--color-text-weak);
+  margin-top: 2px;
+}
+[data-slot="faq-icon-minus"] { display: none; }
+[data-slot="faq-item"][data-expanded] [data-slot="faq-icon-plus"] { display: none; }
+[data-slot="faq-item"][data-expanded] [data-slot="faq-icon-minus"] { display: block; }
+[data-slot="faq-question-text"] { flex-grow: 1; text-align: left; }
+[data-slot="faq-answer"] {
+  margin-left: 40px;
+  margin-bottom: 32px;
+  line-height: 200%;
+}
+[data-slot="faq-answer"][data-closed] { display: none; }
+
+/* ---------------- 订阅表单 ---------------- */
+
+[data-component="email"] {
+  border-top: 1px solid var(--color-border-weak);
+  padding: var(--vertical-padding) var(--padding);
+  color: var(--color-text);
+}
+[data-slot="form"] {
+  position: relative;
+  max-width: 640px;
+}
+[data-slot="form"] input {
+  background: transparent;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-weak);
+  padding: 20px;
+  width: 100%;
+  color: var(--color-text-strong);
+}
+[data-slot="form"] input::placeholder {
+  color: var(--color-text-weak);
+  opacity: 1;
+}
+[data-slot="form"] input:focus {
+  outline: none;
+  border: 1px solid var(--color-site-bg-strong);
+  box-shadow: 0 0 0 3px var(--color-site-interactive);
+}
+@media (prefers-color-scheme: dark) {
+  [data-slot="form"] input:focus {
+    box-shadow: none;
+    border: 1px solid var(--color-site-interactive);
+  }
+}
+[data-slot="form"] button {
+  position: absolute;
+  height: 40px;
+  right: 12px;
+  top: 50%;
+  margin-top: -20px;
+  background: var(--color-site-bg-strong);
+  padding: 4px 20px;
+  color: var(--color-text-inverted);
+  border-radius: 4px;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+[data-slot="form"] button:hover { background: var(--color-site-bg-strong-hover); }
+@media (max-width: 30rem) {
+  [data-slot="form"] input { padding-bottom: 80px; }
+  [data-slot="form"] button {
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    top: auto;
+    margin-top: 0;
+  }
+}
+[data-slot="form-note"] {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--color-text-weak);
+}
+
+/* ---------------- 页脚 ---------------- */
+
+[data-component="footer"] {
+  border-top: 1px solid var(--color-border-weak);
+  display: flex;
+  flex-direction: row;
+}
+@media (max-width: 65rem) {
+  [data-component="footer"] { border-bottom: 1px solid var(--color-border-weak); }
+}
+[data-component="footer"] [data-slot="cell"] {
+  flex: 1;
+  text-align: center;
+}
+[data-component="footer"] [data-slot="cell"] a {
+  text-decoration: none;
+  padding: 2rem 0;
+  width: 100%;
+  display: block;
+}
+[data-component="footer"] [data-slot="cell"] a:hover {
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  text-decoration-thickness: 1px;
+}
+[data-component="footer"] [data-slot="cell"] span {
+  color: var(--color-text-weak);
+}
+@media (max-width: 40rem) {
+  [data-component="footer"] [data-slot="cell"] span { display: none; }
+}
+[data-component="footer"] [data-slot="cell"] + [data-slot="cell"] {
+  border-left: 1px solid var(--color-border-weak);
+}
+@media (max-width: 40rem) {
+  [data-component="footer"] [data-slot="cell"] + [data-slot="cell"] {
+    border-left: none;
+  }
+}
+
+[data-component="legal"] {
+  color: var(--color-text-weak);
+  text-align: center;
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0 var(--padding);
+}
+[data-component="legal"] a {
+  color: var(--color-text-weak);
+  text-decoration: none;
+}
+[data-component="legal"] a:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+/* ---------------- 通用小组件 ---------------- */
+
+[data-slot="badge"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-border-weak);
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 2px;
+  color: var(--color-text-weak);
+  white-space: nowrap;
+}
+
+.mono-num { font-variant-numeric: tabular-nums; }
+
+/* 滚动淡入：IntersectionObserver 加 data-visible */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s cubic-bezier(0.22, 0.9, 0.28, 1),
+              transform 0.5s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+[data-reveal][data-visible] {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1; transform: none; transition: none; }
+}
+
+/* ==========================================================================
+   动效背景（星空 + 星轨 + 透视网格）
+   与登录页同一套画法，由 /assets/backdrop.js 挂载。各页面把它们放在最底层，
+   内容容器需要 position:relative 且 z-index 高于背景。
+   ========================================================================== */
+
+.pmt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--color-text-strong);
+  opacity: 0.5;
+}
+
+.pmt-backdrop-nebula {
+  position: absolute;
+  inset: -10%;
+  background: radial-gradient(
+    ellipse 60% 45% at 28% 32%,
+    rgba(255, 255, 255, 0.10),
+    transparent 70%
+  );
+  filter: blur(30px);
+}
+
+.pmt-backdrop-stars {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pmt-orbits { opacity: 0.34; }
+.pmt-constellations { opacity: 0.42; }
+
+.pmt-twinkle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pmt-twinkle 4.2s ease-in-out infinite alternate;
+}
+@keyframes pmt-twinkle {
+  0% { opacity: 0.25; transform: scale(0.82); }
+  100% { opacity: 1; transform: scale(1.12); }
+}
+
+.pmt-backdrop-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  opacity: 1;
+}
+
+/* 深色下星空更亮，浅色下压暗，避免纸白底上糊成一片灰 */
+@media (prefers-color-scheme: dark) {
+  .pmt-backdrop { opacity: 0.7; }
+  /* gridscan 自己按主题调色，这里不再二次压透明度 */
+  .pmt-backdrop-grid { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pmt-twinkle { animation: none; opacity: 0.7; }
+}
+
+/* 内容层压在背景之上（背景是 position:fixed z-index:0） */
+body[data-page="site"] > main,
+body > main[data-page="stats"],
+body > .site-header,
+body > .layout,
+body > .page-foot {
+  position: relative;
+  z-index: 1;
+}
+
+/* 动效背景是 body 的子元素：html 的底色当底，背景画在它上面，内容再压在
+   背景之上。所以 html 必须保留不透明底色，只让中间的内容容器透明。 */

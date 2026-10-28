@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<script>
+  /* 首屏前套用存过的主题，避免先渲染亮色再跳暗色 */
+  try {
+    var t = localStorage.getItem('pmt_site_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs | Prometheus API</title>
+<meta name="description" content="Prometheus API 的接入文档：怎么拿到 Key、怎么配置 base_url、模型清单、额度口径、错误码与隐私说明。">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+
+<div class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+      <span class="brand-text"><em>docs</em></span>
+    </a>
+    <nav data-component="nav-desktop">
+      <a href="/docs" aria-current="page">Docs</a>
+      <a href="/plan">Plan</a>
+      <a href="/data">Data</a>
+      <a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div class="header-right">
+      <button id="theme-toggle" data-slot="theme-toggle" type="button"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a class="cta" href="/login">登录</a>
+      <!-- 汉堡按钮与首页同一套标记，展开后同样是这两枚图标互换 -->
+      <button type="button" class="nav-toggle" aria-expanded="false"
+              aria-controls="nav-mobile-menu" aria-label="打开菜单">
+        <span class="sr-only">打开菜单</span>
+        <svg class="icon icon-hamburger" width="24" height="24" viewBox="0 0 24 24"
+             fill="none" aria-hidden="true">
+          <path d="M19 8H5V7H19V8Z" fill="currentColor"/>
+          <path d="M19 17H5V16H19V17Z" fill="currentColor"/>
+        </svg>
+        <svg class="icon icon-close" width="24" height="24" viewBox="0 0 24 24"
+             fill="none" aria-hidden="true">
+          <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 菜单必须放在 .site-header 外面：顶栏带 backdrop-filter，会给
+     position: fixed 的后代创建一个新的包含块，菜单会被压成 0 高。 -->
+<div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+  <ul>
+    <li><a href="/docs" aria-current="page">Docs</a></li>
+    <li><a href="/plan">Plan</a></li>
+    <li><a href="/data">Data</a></li>
+    <li><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></li>
+    <li><a href="/login">登录</a></li>
+  </ul>
+  <!-- 目录由脚本从左侧栏克隆进来，免得手写 12 个链接 -->
+  <div id="docs-mobile-toc"></div>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <nav aria-label="Docs 目录">
+      <section>
+        <ul>
+          <li><a href="#intro">开始</a></li>
+          <li><a href="#start">接入</a></li>
+          <li><a href="#models">模型</a></li>
+        </ul>
+      </section>
+      <section>
+        <h2>使用</h2>
+        <ul>
+          <li><a href="#harness">客户端配置</a></li>
+          <li><a href="#api">接口</a></li>
+          <li><a href="#stream">流式与思考</a></li>
+        </ul>
+      </section>
+      <section>
+        <h2>账号</h2>
+        <ul>
+          <li><a href="#quota">额度</a></li>
+          <li><a href="#account">账号与密码</a></li>
+          <li><a href="#errors">错误码</a></li>
+        </ul>
+      </section>
+      <section>
+        <h2>其它</h2>
+        <ul>
+          <li><a href="#privacy">隐私</a></li>
+          <li><a href="#faq">常见问题</a></li>
+        </ul>
+      </section>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1 id="intro">开始</h1>
+    <p>Prometheus API 是 Prometheus Lab 社团维护的模型接入服务。它对外暴露一套 OpenAI 兼容接口，把社团统采的几个上游账号池封装成一个 base_url，再用 API Key 分发给成员。</p>
+    <p>你能用的模型取决于社团开给你的白名单，成本从你账户的日额度与周额度里扣。任何能配置 OpenAI 兼容 base_url 的客户端都能用：Pi、Codex、Zcode、DeepSeek Harness、Hermes、Claude Code 等，或者你自己写的脚本。</p>
+
+    <h2 id="start">接入</h2>
+    <p>三步：拿到 Key，配好 base_url，选一个模型名。</p>
+    <ol>
+      <li>向社团负责人申请账号，你会得到一个 <code>sicau-PMT-</code> 开头的 API Key。</li>
+      <li>把 <code>https://api.hhy.homes/v1</code> 当作 OpenAI 的 <code>base_url</code>，把 Key 当作 <code>api_key</code>。</li>
+      <li>模型名直接用 <code>GET /v1/models</code> 返回的 <code>id</code>，大小写不敏感。</li>
+    </ol>
+
+    <pre><code>curl https://api.hhy.homes/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sicau-PMT-..." \
+  -d '{
+    "model": "DeepSeek-V4.1-Flash",
+    "messages": [{"role": "user", "content": "写一个快排"}],
+    "stream": true
+  }'</code></pre>
+
+    <div class="tip">
+      <strong>先验一下 Key。</strong><code>GET /v1/models</code> 只需要 Key 不需要花额度，用它就能确认 Key 是否有效、能看到哪些模型。
+    </div>
+
+    <h2 id="models">模型</h2>
+    <p>同一个模型背后可能有好几家上游。对外只暴露一个名字，网关按顺序尝试：优先账号所属的那家先试，它连不上就换另一家重连，对客户端始终是一条流。</p>
+    <div class="table-wrap">
+      <table id="model-table">
+        <thead>
+          <tr><th>模型</th><th>上下文</th><th>输入（元/百万）</th><th>输出（元/百万）</th></tr>
+        </thead>
+        <tbody><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="foot-note">价格取自各家官方中文定价页，含缓存读与缓存写的独立单价。<a href="/data">Data</a> 页可以看到实际用量与折算成本。</p>
+
+    <h2 id="harness">客户端配置</h2>
+
+    <h3>Pi-Agent</h3>
+    <p>把下面的片段并进 <code>~/.pi/agent/models.json</code>，把 <code>models</code> 数组换成你要用的模型名。</p>
+    <pre><code>{
+  "providers": {
+    "prometheus": {
+      "baseUrl": "https://api.hhy.homes/v1",
+      "api": "openai-completions",
+      "apiKey": "$PMT_API_KEY",
+      "models": [
+        { "id": "DeepSeek-V4.1-Flash" },
+        { "id": "GLM-5.3-Flash" }
+      ]
+    }
+  }
+}</code></pre>
+
+    <h3>OpenAI SDK</h3>
+    <pre><code>from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.hhy.homes/v1",
+    api_key="sicau-PMT-...",
+)
+print(client.chat.completions.create(
+    model="DeepSeek-V4.1-Flash",
+    messages=[{"role": "user", "content": "hi"}],
+).choices[0].message.content)</code></pre>
+
+    <h3>环境变量</h3>
+    <p>很多 CLI 工具直接读这两个变量，设好就能用：</p>
+    <pre><code>export OPENAI_BASE_URL=https://api.hhy.homes/v1
+export OPENAI_API_KEY=sicau-PMT-...</code></pre>
+
+    <h2 id="api">接口</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>GET</td><td><code>/v1/models</code></td><td>列出你的 Key 可用的模型</td></tr>
+          <tr><td>POST</td><td><code>/v1/chat/completions</code></td><td>对话补全，支持 <code>stream</code> 与工具调用</td></tr>
+          <tr><td>GET</td><td><code>/health</code></td><td>存活检查，不需要鉴权</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="stream">流式与思考</h2>
+    <p>SSE 开写之后就不能再补发 HTTP 错误响应，所以流已经开始时的上游故障会以一条 <code>data: {"error": ...}</code> 事件收尾，随后是 <code>[DONE]</code>。客户端要把这种事件当成错误显示。</p>
+    <p>思考档位用 <code>reasoning_effort</code> 传。上游对不认识的档位不报错，而是静默忽略；<code>finish_reason</code> 为空的块会被归一成 <code>null</code>。</p>
+
+    <h2 id="quota">额度</h2>
+    <p>额度按<strong>成本</strong>计算，不按请求次数：每次请求的输入、输出、缓存读、缓存写各自按单价折算成人民币累加。</p>
+    <p>额度是<strong>按模型</strong>算的，按份额累加：每个模型有自己的日额度与总额度（默认等于你档位那一份，例如 Plus 是每日 ¥15、总额 ¥75），一次调用占用「本次金额 ÷ 该模型额度」那么多份额，各模型份额加起来到 100% 就用完了。</p>
+    <p>举例：a 额度 ¥100、d 额度 ¥10。a 花 ¥50 占 50%，再花 d ¥4 占 40%，合计 90%，还剩 10%——这 10% 既可以继续花 ¥10 在 a 上，也可以花 ¥1 在 d 上。所以档位那个金额是对外口径，实际能用多少看份额。某个模型自己先到 100% 时只停那一个模型。四个档位的具体数值见 <a href="/plan">Plan</a>。</p>
+    <ul>
+      <li><strong>日额度</strong>：本地时间 0 点重置。</li>
+      <li><strong>总额度</strong>：不重置，按累计消耗算。</li>
+      <li><strong>限额为 0</strong> 表示不限。管理员可以给某个成员单独调小某个模型的额度，调小只影响之后能用多少，已经发生的用量不会变。</li>
+    </ul>
+    <p>控制台的 <a href="/console#models">模型</a> 页可以看到每个模型的单价、额度与已用百分比。</p>
+
+    <h2 id="account">账号与密码</h2>
+    <p>账号由管理员在后台创建，初始密码会当面或私下告知。登录后可以在成员控制台自行改密码；管理员看不到你改后的密码，只能把你重置成初始密码。</p>
+    <p>API Key 在成员控制台自己创建，分两条通道：<strong>PLAN</strong> 按档位额度算，<strong>API</strong> 按赠礼余额算，两边互不影响。明文只在生成的那一刻显示一次，之后数据库里只有 sha256，谁也取不回原文。丢了就删掉重建一把新的。</p>
+
+    <h2 id="errors">错误码</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>HTTP</th><th>code</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td>401</td><td><code>missing_api_key</code></td><td>请求没带 Key</td></tr>
+          <tr><td>401</td><td><code>invalid_api_key</code></td><td>Key 不存在或已停用</td></tr>
+          <tr><td>403</td><td><code>ip_forbidden</code></td><td>来源 IP 不在 Key 的白名单里</td></tr>
+          <tr><td>403</td><td><code>model_forbidden</code></td><td>这个模型没开给你的 Key</td></tr>
+          <tr><td>429</td><td><code>model_quota_exceeded</code></td><td>这个模型自己的额度已用满，换别的模型还能用</td></tr>
+          <tr><td>429</td><td><code>quota_daily_exceeded</code></td><td>今日额度已用满，本地时间 0 点重置</td></tr>
+          <tr><td>429</td><td><code>quota_total_exceeded</code></td><td>总额度已用满</td></tr>
+          <tr><td>429</td><td><code>api_balance_exhausted</code></td><td>API 通道余额不足，需要管理员发放</td></tr>
+          <tr><td>429</td><td><code>login_locked</code></td><td>登录尝试次数过多，稍后再试</td></tr>
+          <tr><td>502</td><td><code>upstream_busy</code></td><td>上游账号池暂时没有可用账号</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="privacy">隐私</h2>
+    <p>我们只保存计费需要的元数据，不保存请求与响应的正文。</p>
+    <ul>
+      <li><strong>存</strong>：模型名、输入/输出/缓存 token 数、折算成本、状态码、来源 IP、时间戳、所属成员与账号。</li>
+      <li><strong>不存</strong>：消息正文、系统提示词、工具调用参数、模型输出、文件内容、代码片段。</li>
+      <li><strong>不用于训练</strong>：任何保存下来的字段都不参与模型训练或微调，我们也没有把数据导出给第三方的通道。</li>
+      <li><strong>公开看板</strong>：<a href="/data">Data</a> 页只展示聚合后的 token 与成本，成员以序号出现，不含姓名、邮箱和密钥。</li>
+    </ul>
+
+    <h2 id="faq">常见问题</h2>
+    <details>
+      <summary>模型名大小写敏感吗？</summary>
+      <p>不敏感。<code>deepseek-v4.1-flash</code> 与 <code>DeepSeek-V4.1-Flash</code> 指向同一个模型，但建议用 <code>/v1/models</code> 返回的写法。</p>
+    </details>
+    <details>
+      <summary>为什么我的请求返回 429？</summary>
+      <p>先看返回的 <code>message</code>：写「日额度」就是当天用满了，等本地 0 点；写「周额度」就是本周用满了，等下周。<code>upstream_busy</code> 是账号池暂时没有可用账号，过一会儿重试即可。</p>
+    </details>
+    <details>
+      <summary>能同时开多个并发的代理吗？</summary>
+      <p>可以，额度按成本累计，并发不额外限制。但并发太多时上游账号池可能排队，表现为延迟升高而不是报错。</p>
+    </details>
+    <details>
+      <summary>可以把 Key 分享给同学吗？</summary>
+      <p>不建议。额度按 Key 累计，分享出去等于把配额和封禁风险一起交出去。每人一把 Key 才能看到各自的用量。</p>
+    </details>
+    <details>
+      <summary>为什么某个模型突然不见了？</summary>
+      <p>上游下线某个模型时，网关会把它从 <code>/v1/models</code> 里摘掉，避免客户端选到跑不通的名字。历史账目不受影响。</p>
+    </details>
+
+    <div class="page-foot">
+      <a href="/">← 返回首页</a>
+      <a href="/data">用量看板 →</a>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { fmtMoney, esc } from '/assets/site.js';
+import { initMobileNav } from '/assets/nav-mobile.js';
+
+initMobileNav();
+
+/* 主题切换由 /assets/theme-toggle.js 统一接管。 */
+
+/* 手机抽屉里的目录：把左侧栏整份克隆进来，不用手写 12 个链接。
+   必须用 cloneNode 而不是搬移，否则桌面端左侧栏会消失。 */
+const tocSlot = document.getElementById('docs-mobile-toc');
+const sidebar = document.querySelector('.sidebar');
+if (tocSlot && sidebar) {
+  const clone = sidebar.cloneNode(true);
+  clone.className = 'docs-mobile-toc';
+  clone.removeAttribute('aria-hidden');
+  tocSlot.replaceWith(clone);
+}
+
+/* 目录高亮：滚动到哪个 h2 就把对应链接点出来。
+   抽屉里的克隆链接也要一起变色。 */
+const links = [...document.querySelectorAll('.sidebar a[href^="#"], .docs-mobile-toc a[href^="#"]')];
+const targets = links
+  .map((a) => document.getElementById(a.getAttribute('href').slice(1)))
+  .filter(Boolean);
+const io = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (!e.isIntersecting) return;
+    links.forEach((a) =>
+      a.classList.toggle('active', a.getAttribute('href') === '#' + e.target.id));
+  });
+}, { rootMargin: '-10% 0px -75% 0px' });
+targets.forEach((t) => io.observe(t));
+
+/* 模型表 */
+try {
+  const data = await fetch('/api/public/plans').then((r) => r.json());
+  const ctx = (n) => (n ? (n >= 1000 ? (n / 1000) + 'K' : String(n)) : '—');
+  const rows = data.models.slice(0, 24).map((m) => `
+    <tr>
+      <td><code>${esc(m.name)}</code></td>
+      <td class="muted">${ctx(m.context)}</td>
+      <td>${fmtMoney(m.price.input)}</td>
+      <td>${fmtMoney(m.price.output)}</td>
+    </tr>`).join('');
+  document.querySelector('#model-table tbody').innerHTML = rows ||
+    '<tr><td colspan="4" class="muted">暂时读不到模型目录。</td></tr>';
+} catch (e) {
+  document.querySelector('#model-table tbody').innerHTML =
+    '<tr><td colspan="4" class="muted">暂时读不到模型目录。</td></tr>';
+}
+</script>
+<script type="module" src="/assets/theme-toggle.js"></script>
+<script type="module">
+import { initWordmarkScroll } from '/assets/wordmark.js';
+initWordmarkScroll(document.querySelector('.wordmark'));
+</script>
+</body>
+</html>
+
+<script type="module">
+  import { mountBackdrop } from '/assets/backdrop.js';
+  mountBackdrop();
+</script>

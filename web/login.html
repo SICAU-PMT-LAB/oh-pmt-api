@@ -2,100 +2,182 @@
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>登录 · oh-pmt-api</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/ui.css">
-<style>
-  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-  .box { width: 100%; max-width: 380px; padding: 24px; position: relative; z-index: 1; }
-  .mark { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; }
-  .mark svg { width: 26px; height: 26px; color: var(--gold); }
-  .mark .name { font-family: var(--serif); font-size: 22px; font-weight: 500; }
-  h1 { font-family: var(--serif); font-size: 30px; font-weight: 500; margin: 0 0 4px; }
-  .sub { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 26px; }
-  form { animation: rise .5s cubic-bezier(.2,.7,.25,1) both; }
-  button[type=submit] { width: 100%; justify-content: center; margin-top: 8px; padding: 10px; }
-  .err { color: var(--err); font-size: 13px; margin-top: 14px; min-height: 20px; }
-  .theme-toggle { position: fixed; top: 20px; right: 20px; z-index: 2; }
-  .rule { display: flex; align-items: center; gap: 12px; margin: 26px 0 0; }
-  .rule .line { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-line), transparent); }
-  .rule svg { width: 14px; height: 14px; color: var(--gold); }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>登录 · Prometheus API</title>
+<script>
+/* 主题必须在首次绘制前落地：否则深色模式下会先闪一下白底。
+   两处来源：上次手动选的主题，其次系统主题。 */
+(function () {
+  var t = 'light';
+  try {
+    t = localStorage.getItem('pmt_login_theme') ||
+        (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark' : 'light');
+  } catch (e) {}
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#111110' : '#fbfaf7';
+})();
+</script>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/login.css">
 </head>
 <body>
-<div class="theme-toggle">
-  <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
-  <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
+
+<div class="login-root">
+  <!-- 星空与星轨 -->
+  <div class="paper-backdrop" aria-hidden="true">
+    <div class="paper-cosmos">
+      <div class="cosmos-nebula"></div>
+      <svg class="cosmos-chart" id="cosmos" viewBox="0 0 1440 900"
+           preserveAspectRatio="xMidYMid slice"></svg>
+    </div>
+  </div>
+
+  <!-- 三维透视网格与光波 -->
+  <canvas id="grid-canvas" aria-hidden="true"></canvas>
+
+  <!-- 回官网：常驻左上角，任何一步都能退出去 -->
+  <a class="chrome-btn home-btn" href="/" aria-label="返回官网首页" title="返回官网首页">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5"/>
+    </svg>
+  </a>
+
+  <!-- 返回闸机 -->
+  <button class="chrome-btn back-btn" id="back" type="button" aria-label="返回">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/>
+    </svg>
+    <span>返回</span>
+  </button>
+
+  <!-- 主题切换 -->
+  <button class="chrome-btn theme-toggle" id="theme-toggle" type="button"
+          data-round aria-label="切换主题"></button>
+
+  <!-- 闸机面板 -->
+  <div class="gate-panel" id="gate">
+    <div class="gate-wordmark" id="gate-wordmark">
+      <span>p</span><span>r</span><span>o</span><span>m</span><span>e</span>
+      <span>t</span><span>h</span><span>e</span><span>u</span><span>s</span>
+      <span>l</span><span>a</span><span>b</span>
+    </div>
+    <div class="gate-sub">API RELAY</div>
+    <div class="gate-divider"></div>
+    <div class="gate-actions">
+      <button class="gate-btn gate-btn-primary" id="to-badge" type="button">登录</button>
+      <button class="gate-btn gate-btn-ghost" id="to-badge-2" type="button">注册</button>
+    </div>
+  </div>
+
+  <!-- 吊牌 -->
+  <div class="lanyard-badge-layer" id="lanyard">
+    <svg class="rope" aria-hidden="true">
+      <path class="rope-path" id="rope-path"></path>
+      <circle class="rope-anchor" id="rope-anchor" r="3"></circle>
+    </svg>
+    <div class="badge-card" id="badge" role="button" tabindex="0"
+         aria-label="打开登录面板">
+      <div class="badge-hole"></div>
+      <div class="badge-body">
+        <span class="badge-mark">P</span>
+        <span class="badge-divider"></span>
+        <span class="badge-name">prometheuslab</span>
+        <span class="badge-title">API RELAY</span>
+      </div>
+      <div class="badge-hint"><span class="badge-hint-dot"></span></div>
+    </div>
+  </div>
+
+  <!-- 翻转登录面板 -->
+  <div class="panel-wrap" id="panel-wrap" hidden>
+    <div class="flip-panel" id="panel">
+      <div class="panel-header">
+        <span class="panel-mark">P</span>
+        <span class="panel-brand">prometheuslab api</span>
+        <button type="button" class="panel-close" id="panel-close" aria-label="关闭">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="panel-body stagger">
+        <div>
+          <h1 class="panel-title">欢迎回来</h1>
+          <p class="panel-desc">登录您的账户以继续</p>
+        </div>
+
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label for="email">账号</label>
+            <div class="field-input">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="1.5"/>
+                <path d="m3.5 6.5 8.5 6 8.5-6"/>
+              </svg>
+              <input id="email" type="text" required autocomplete="username"
+                     placeholder="社团分配的账号">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="password">密码</label>
+            <div class="field-input">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <rect x="4.5" y="10.5" width="15" height="10" rx="1.5"/>
+                <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+              </svg>
+              <input id="password" type="password" required autocomplete="current-password"
+                     placeholder="请输入密码">
+              <button type="button" class="reveal" id="reveal" aria-pressed="false"
+                      aria-label="显示密码">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
+            <div class="field-foot">
+              <a href="/docs#account">忘记密码？</a>
+            </div>
+          </div>
+
+          <button type="submit" class="submit" id="submit"
+                  data-icon='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" stroke-linecap="round" stroke-linejoin="round"/></svg>'>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.5" aria-hidden="true">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>登录</span>
+          </button>
+          <div class="form-error" id="form-error" role="alert"></div>
+        </form>
+
+        <p class="panel-note">
+          账号由 Prometheus Lab 社团分配。没有账号请在
+          <a href="/plan">Plan</a> 页查看申请方式，或加入
+          <a href="/">候补名单</a>。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="copyright">© <span id="year">2026</span> PrometheusLab</div>
 </div>
 
-<div class="box">
-  <div class="mark">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-      <circle cx="12" cy="12" r="8.4" opacity=".45"/>
-      <circle cx="12" cy="12" r="4.6"/>
-      <path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3" opacity=".7"/>
-    </svg>
-    <span class="name">oh-pmt-api</span>
-  </div>
-  <h1>登录</h1>
-  <div class="sub">用管理员分配给你的账号密码登录。</div>
-  <form id="f">
-    <div class="field">
-      <label for="u">账号</label>
-      <input id="u" autocomplete="username" placeholder="账号" required>
-    </div>
-    <div class="field">
-      <label for="p">密码</label>
-      <input id="p" type="password" autocomplete="current-password" placeholder="密码" required>
-    </div>
-    <button type="submit" class="primary" id="btn">登录</button>
-  </form>
-  <div class="err" id="e"></div>
-  <div class="rule">
-    <span class="line"></span>
-    <svg viewBox="0 0 20 20" fill="currentColor">
-      <circle cx="10" cy="10" r="2"/><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width=".8"/>
-    </svg>
-    <span class="line"></span>
-  </div>
-</div>
-
-<script type="module">
-import { initTheme } from '/assets/charts.js';
-initTheme();
-
-const f = document.getElementById('f');
-const btn = document.getElementById('btn');
-const err = document.getElementById('e');
-
-f.addEventListener('submit', async ev => {
-  ev.preventDefault();
-  const username = document.getElementById('u').value.trim();
-  const password = document.getElementById('p').value;
-  if (!username || !password) return;
-  btn.disabled = true; err.textContent = '';
-  try {
-    const res = await fetch('/api/login', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) {
-      location.href = data.redirect || '/me';
-      return;
-    }
-    err.textContent = (data.error && data.error.message) || '登录失败';
-    btn.disabled = false;
-  } catch (e) {
-    err.textContent = '网络错误：' + e.message;
-    btn.disabled = false;
-  }
-});
-</script>
+<script type="module" src="/assets/login.js"></script>
 </body>
 </html>

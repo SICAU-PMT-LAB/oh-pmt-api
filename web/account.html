@@ -3,7 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 主题必须在首次绘制前落地：跨页跳转（如点账号详情）时样式表还没下载完，
+     先按记住的主题刷底色，否则深色模式下会闪一下白屏 -->
+<script>
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('ohpmt_theme') || 'light'; } catch (e) {}
+  var root = document.documentElement;
+  root.dataset.theme = t;
+  root.style.background = t === 'dark' ? '#111110' : '#fdfcf8';
+})();
+</script>
 <title>账号详情 · oh-pmt-api</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -39,6 +53,30 @@
     .hero { grid-template-columns: 1fr; }
     .detail-grid { grid-template-columns: 1fr; }
   }
+  /* 窄屏表格卡片化：与 panel.css 的 table.stack 同一套画法。
+     本页只引 ui.css，规则在这里自带一份。 */
+  @media (max-width: 44rem) {
+    table.stack thead { display: none; }
+    table.stack, table.stack > tbody, table.stack > tbody > tr, table.stack > tbody > tr > td {
+      display: block;
+    }
+    table.stack > tbody > tr {
+      border: 1px solid var(--rule); border-radius: 9px; background: var(--card);
+      padding: 12px 14px; margin-bottom: 10px;
+    }
+    table.stack > tbody > tr:last-child { margin-bottom: 0; }
+    table.stack > tbody > tr > td {
+      border: none; padding: 4px 0; white-space: normal; text-align: left;
+      display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    }
+    table.stack > tbody > tr > td::before {
+      content: attr(data-label);
+      font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--ink-faint); flex: none;
+    }
+    table.stack > tbody > tr > td:first-child { display: block; padding-bottom: 8px; }
+    table.stack > tbody > tr > td:first-child::before { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -61,14 +99,14 @@
       <a href="/admin#accounts" class="active"><span class="ico">◇</span>账号</a>
       <a href="/admin#members"><span class="ico">◉</span>成员</a>
       <a href="/admin#analytics"><span class="ico">▤</span>数据</a>
-      <a href="/admin#settings"><span class="ico">⌘</span>接入</a>
     </nav>
     <div class="sidebar-foot">
-      <div class="theme-toggle" title="切换明暗">
-        <div class="opt on" data-theme-opt="light" title="白底金边">☀</div>
-        <div class="opt" data-theme-opt="dark" title="黑底金边">☾</div>
+      <div class="sidebar-row">
+        <button type="button" class="theme-icon" title="切换明暗"
+                aria-label="切换明暗"></button>
+        <a href="#" class="logout-link" id="logout"><span class="ico">⏻</span>退出登录</a>
       </div>
-      <div style="margin-top:12px"><a href="/admin#accounts" style="color:var(--gold)">← 返回账号列表</a></div>
+      <div style="margin-top:8px"><a href="/admin#accounts" style="color:var(--gold)">← 返回账号列表</a></div>
     </div>
   </aside>
 
@@ -79,7 +117,7 @@
 
 <script type="module">
 import {
-  initTheme, api, toast, esc, fmtInt, fmtCompact,
+  initTheme, api, toast, esc, fmtInt, fmtCompact, fmtMoney,
   lineChart, barChart, ringChart, hbarList, countUp,
 } from '/assets/charts.js';
 
@@ -103,7 +141,11 @@ async function load() {
   }
 }
 
-const modelName = id => (MODELS.find(m => m.id === id) || {}).name || id || '未知';
+const modelById = id => MODELS.find(m => m.id === id)
+  || MODELS.find(m => (m.upstream_keys || []).includes(id))
+  || { id, name: id };
+
+const modelName = id => modelById(id).name || id || '未知';
 
 // 凭据有效期从十几分钟到一个月都有，统一按量级换单位
 function expiresLabel(seconds) {
@@ -182,8 +224,8 @@ function render() {
             `成功 ${fmtInt(t.ok || 0)} 次`)}
       ${kpi('Token', `<span data-count="${t.tokens || 0}" data-dec="0">0</span>`,
             `入 ${fmtCompact(t.prompt_tokens || 0)} · 出 ${fmtCompact(t.completion_tokens || 0)}`)}
-      ${kpi('网关记账积分', `<span data-count="${t.credits || 0}" data-dec="3">0</span>`,
-            `上游已用 ${fmtCompact(a.credits_used)}`)}
+      ${kpi('网关记账成本', fmtMoney(t.cost || 0),
+            `上游已用 ${fmtCompact(a.credits_used)} 积分`)}
       ${kpi('凭证', `<span class="mono" style="font-size:15px">${esc(a.credential_masked || '—')}</span>`,
             `${esc(a.credential_hint || '')}`)}
     </div>
@@ -191,11 +233,11 @@ function render() {
     <div class="grid-wide-left">
       <div class="chart-card">
         <div class="chart-head">
-          <span class="t">近 14 天 · 请求与积分</span>
+          <span class="t">近 14 天 · 请求与成本</span>
           <span class="spacer"></span>
           <div class="chart-legend">
             <span class="li"><span class="sw" style="background:var(--gold)"></span>请求</span>
-            <span class="li"><span class="sw" style="background:var(--bronze)"></span>积分</span>
+            <span class="li"><span class="sw" style="background:var(--bronze)"></span>成本</span>
           </div>
         </div>
         <div id="det-trend"></div>
@@ -262,13 +304,13 @@ function render() {
 
     <div class="chart-card">
       <div class="chart-head"><span class="t">该账号的按模型明细</span></div>
-      <div class="table-wrap"><table id="det-by-model-table"></table></div>
+      <div class="table-wrap"><table id="det-by-model-table" class="stack"></table></div>
     </div>
 
     <div class="chart-card">
       <div class="chart-head"><span class="t">最近调用</span></div>
       <div class="table-wrap">
-        <table>
+        <table class="stack">
           <thead><tr><th>时间</th><th>模型</th><th class="num">积分</th>
             <th class="num">Token</th><th>结果</th></tr></thead>
           <tbody id="det-recent"></tbody>
@@ -290,8 +332,8 @@ function render() {
     labels: a.daily.map(d => d.date),
     series: [
       { name: '请求', color: 'var(--gold)', values: a.daily.map(d => d.requests) },
-      { name: '积分', color: 'var(--bronze)', values: a.daily.map(d => d.credits) },
-    ], area: true, height: 200,
+      { name: '成本', color: 'var(--bronze)', values: a.daily.map(d => d.cost) },
+    ], area: true, height: 200, yFmt: fmtMoney,
   });
 
   barChart(document.getElementById('det-models'), {
@@ -304,31 +346,31 @@ function render() {
     { label: '模型', fmt: r => modelName(r.id) === r.id
         ? `<span class="mono">${esc(r.id)}</span>`
         : `${esc(modelName(r.id))}<div class="sub">${esc(r.id)}</div>` },
-    { label: '请求量', cls: 'num', fmt: r => fmtInt(r.requests) },
-    { label: '失败', cls: 'num', fmt: r => fmtInt(r.errors) },
-    { label: '成功率', cls: 'num', fmt: r => r.requests
+    { label: '请求量', cls: 'num', dl: '请求量', fmt: r => fmtInt(r.requests) },
+    { label: '失败', cls: 'num', dl: '失败', fmt: r => fmtInt(r.errors) },
+    { label: '成功率', cls: 'num', dl: '成功率', fmt: r => r.requests
         ? `<span class="pill ${(r.ok / r.requests) >= 0.95 ? 'ok' : 'warn'}">${((r.ok / r.requests) * 100).toFixed(1)}%</span>`
         : '<span class="hint">—</span>' },
-    { label: 'Token', cls: 'num', fmt: r => fmtInt(r.tokens) },
-    { label: '积分', cls: 'num', fmt: r => Number(r.credits).toFixed(4) },
+    { label: 'Token', cls: 'num', dl: 'Token', fmt: r => fmtInt(r.tokens) },
+    { label: '成本', cls: 'num', dl: '成本', fmt: r => fmtMoney(r.cost) },
   ];
   const table = document.getElementById('det-by-model-table');
   if (!a.by_model.length) table.innerHTML = '<tbody><tr><td class="empty">这个账号还没有调用记录</td></tr></tbody>';
   else table.innerHTML = `<thead><tr>${cols.map(c =>
       `<th class="${c.cls || ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
     <tbody>${a.by_model.map(r => `<tr>${cols.map(c =>
-      `<td class="${c.cls || ''}">${c.fmt(r)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      `<td class="${c.cls || ''}"${c.dl ? ` data-label="${esc(c.dl)}"` : ''}>${c.fmt(r)}</td>`).join('')}</tr>`).join('')}</tbody>`;
 
   const body = document.getElementById('det-recent');
   // 摘要页只放最近 12 条，其余点开再看，避免页面拉成几千像素长
   const shown = a.recent.slice(0, 12);
   const rowHtml = r => `<tr>
-    <td class="mono">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
+    <td class="mono" data-label="时间">${new Date(r.created_at * 1000).toLocaleString('zh-CN',
       { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-    <td>${esc(modelName(r.model))}</td>
-    <td class="num">${Number(r.credits).toFixed(4)}</td>
-    <td class="num">${fmtInt(r.total_tokens)}</td>
-    <td>${r.status === 200 ? '<span class="pill ok">成功</span>'
+    <td data-label="模型">${esc(modelName(r.model))}</td>
+    <td class="num" data-label="成本">${fmtMoney(r.cost)}</td>
+    <td class="num" data-label="Token">${fmtInt(r.total_tokens)}</td>
+    <td data-label="结果">${r.status === 200 ? '<span class="pill ok">成功</span>'
       : `<span class="pill err">${esc(r.error || r.status)}</span>`}</td>
   </tr>`;
   body.innerHTML = shown.length ? shown.map(rowHtml).join('')
@@ -384,6 +426,13 @@ function kpi(k, v, d = '') {
 }
 
 document.addEventListener('themechange', () => { if (DATA) render(); });
+
+document.getElementById('logout').addEventListener('click', async e => {
+  // 退出登录是 <a href="#">，不拦的话会先跳到页首再跳登录页
+  e.preventDefault();
+  try { await api('/api/logout', { method: 'POST' }); } catch { /* 清 cookie 失败也跳走 */ }
+  location.href = '/login';
+});
 load();
 </script>
 </body>

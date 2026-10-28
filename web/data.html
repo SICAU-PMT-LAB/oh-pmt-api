@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<script>
+  /* 首屏前套用存过的主题，避免先渲染亮色再跳暗色 */
+  try {
+    var t = localStorage.getItem('pmt_site_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+    else document.documentElement.dataset.theme =
+      matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch (e) {}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型数据 | Prometheus API</title>
+<meta name="description" content="本站的公开用量看板：哪些模型在被真实使用、使用组合如何变化，以及这对成本意味着什么。">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/data.css">
+</head>
+<body>
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+<main data-page="stats">
+<header data-component="top">
+  <div data-slot="header-bar">
+    <a data-slot="brand" href="/" aria-label="Prometheus API 首页">
+      <span data-slot="stats-wordmark"><b>DATA</b></span>
+    </a>
+    <nav data-component="section-nav" aria-label="数据分区">
+      <ul>
+        <li><a href="#top-models">热门模型</a></li>
+        <li><a href="#leaderboard">排行榜</a></li>
+        <li><a href="#session-cost">会话成本</a></li>
+        <li><a href="#token-cost">Token 成本</a></li>
+        <li><a href="#cache-ratio">缓存比例</a></li>
+  
+      </ul>
+    </nav>
+    <div data-slot="header-actions">
+      <button id="theme-toggle" data-slot="theme-toggle" data-variant="round"
+              type="button" aria-label="切换明暗" title="切换明暗"></button>
+      <button data-slot="menu-button" type="button" aria-controls="stats-mobile-nav"
+              aria-expanded="false" aria-label="打开导航">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.72H14M2 8.5H14M2 12.28H14" stroke="currentColor"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <nav id="stats-mobile-nav" data-slot="mobile-menu" aria-label="数据分区" hidden>
+    <a data-slot="mobile-menu-item" href="#top-models">热门模型</a>
+    <a data-slot="mobile-menu-item" href="#leaderboard">排行榜</a>
+    <a data-slot="mobile-menu-item" href="#session-cost">会话成本</a>
+    <a data-slot="mobile-menu-item" href="#token-cost">Token 成本</a>
+    <a data-slot="mobile-menu-item" href="#cache-ratio">缓存比例</a>
+
+  </nav>
+</header>
+
+<div data-component="container">
+<div data-component="content">
+
+<section id="hero" data-section="hero">
+  <p data-slot="hero-meta" role="status" aria-atomic="true">
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M13 13H3V3H13V13ZM6.46777 6.81641V7.81641H7.5791V11.3721H8.5791V6.81641H6.46777ZM7.30078 4.62891V5.62891H8.85645V4.62891H7.30078Z" fill="currentColor"></path>
+    </svg>
+    <span data-slot="hero-meta-label" aria-hidden="true">已更新</span>
+    <span data-slot="hero-meta-time" aria-hidden="true">
+      <span data-slot="hero-meta-ticker" data-ticking="false">
+        <span data-slot="hero-meta-ticker-track" id="ticker-date"></span>
+      </span>
+      <span data-slot="hero-meta-separator">,</span>
+      <span data-slot="hero-meta-ticker" data-ticking="false">
+        <span data-slot="hero-meta-ticker-track" id="ticker-time"></span>
+      </span>
+    </span>
+  </p>
+  <div data-slot="hero-canvas">
+    <div data-slot="hero-pattern" aria-hidden="true"></div>
+    <h1><a data-slot="heading-link" href="#top-models">模型数据</a></h1>
+    <p data-slot="hero-copy">查看哪些模型正在赢得真实使用量、使用组合如何变化，以及这对成本意味着什么。</p>
+    <p data-slot="visually-hidden" id="hero-summary"></p>
+  </div>
+</section>
+
+<section id="top-models" data-section="top-models">
+  <h2 data-slot="top-models-title"><strong><a data-slot="heading-link" href="#top-models"><span data-slot="heading-anchor" aria-hidden="true">#</span>热门模型.</a></strong> <span>本站各模型的使用情况。</span></h2>
+  <div data-component="top-models-chart" data-range="2M" data-metric="tokens"
+       data-dense-labels="true" role="img" aria-label="热门模型用量堆叠图" id="chart-tokens">
+    <div data-slot="top-models-axis" aria-hidden="true"></div>
+    <div data-slot="top-models-bars"></div>
+  </div>
+  <div data-slot="visually-hidden" id="chart-tokens-table"></div>
+  <div data-slot="leaderboard-period" role="group" aria-label="排行榜">
+    <div data-component="usage-filter" data-variant="range">
+      <button type="button" data-active="true" aria-pressed="true">每周</button>
+      <button type="button" aria-pressed="false">每日</button>
+    </div>
+  </div>
+  
+  <div id="leaderboard" data-component="leaderboard">
+    <div data-slot="leaderboard-featured"></div>
+    <div data-slot="leaderboard-pattern" aria-hidden="true"></div>
+    <div data-slot="leaderboard-compact"></div>
+    <div data-slot="leaderboard-mobile"></div>
+  </div>
+</section>
+
+<section id="unique-users" data-section="unique-users">
+  <a data-component="section-bridge" href="#top-models"><span>了解更多</span><i></i><strong>热门模型</strong><b>▸</b></a>
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#unique-users"><span data-slot="heading-anchor" aria-hidden="true">#</span>独立用户.</a></strong> <span>按模型显示的每日独立用户。</span></h2>
+  <div data-component="top-models-chart" data-range="2M" data-metric="users"
+       data-dense-labels="true" role="img" aria-label="按模型显示的独立用户堆叠图" id="chart-users">
+    <div data-slot="top-models-axis" aria-hidden="true"></div>
+    <div data-slot="top-models-bars"></div>
+  </div>
+  <div data-slot="visually-hidden" id="chart-users-table"></div>
+</section>
+
+<section id="retention" data-section="retention">
+  <a data-component="section-bridge" href="#unique-users"><span>了解更多</span><i></i><strong>独立用户</strong><b>▸</b></a>
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#retention"><span data-slot="heading-anchor" aria-hidden="true">#</span>每周留存.</a></strong> <span>本周用过某模型的成员中，下一周再次使用该模型的比例。</span></h2>
+  <table data-component="retention-chart" role="table" aria-label="每周留存">
+    <thead role="rowgroup">
+      <tr data-slot="retention-heading" role="row">
+        <th data-column="rank" role="columnheader" scope="col">排名</th>
+        <th data-column="model" role="columnheader" scope="col">模型</th>
+        <th data-column="marker" role="columnheader" scope="col">留存</th>
+        <th data-column="rate" role="columnheader" scope="col">比例</th>
+        <th data-column="eligible" role="columnheader" scope="col">样本</th>
+      </tr>
+    </thead>
+    <tbody role="rowgroup" id="retention-body"></tbody>
+  </table>
+</section>
+
+<section id="session-cost" data-section="session-cost">
+  <a data-component="section-bridge" href="#retention"><span>了解更多</span><i></i><strong>每周留存</strong><b>▸</b></a>
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#session-cost"><span data-slot="heading-anchor" aria-hidden="true">#</span>会话成本.</a></strong> <span>每次会话的平均成本。</span></h2>
+  <div data-component="session-cost" id="session-cost-body"></div>
+</section>
+
+<section id="token-cost" data-section="token-cost">
+  <a data-component="section-bridge" href="#session-cost"><span>了解更多</span><i></i><strong>会话成本</strong><b>▸</b></a>
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#token-cost"><span data-slot="heading-anchor" aria-hidden="true">#</span>Token 成本.</a></strong> <span>按实付总额折算的每 100 万 token 价格。</span></h2>
+  <div data-component="token-cost" id="token-cost-body"></div>
+</section>
+
+<section id="cache-ratio" data-section="cache-ratio">
+  <a data-component="section-bridge" href="#token-cost"><span>了解更多</span><i></i><strong>TOKEN 成本</strong><b>▸</b></a>
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#cache-ratio"><span data-slot="heading-anchor" aria-hidden="true">#</span>缓存比例.</a></strong> <span>从缓存提供的输入 token 占比。</span></h2>
+  <div data-component="cache-ratio" data-variant="marker" id="cache-ratio-body"></div>
+</section>
+
+<section id="methodology" data-section="methodology">
+  <h2 data-slot="section-title"><strong><a data-slot="heading-link" href="#methodology"><span data-slot="heading-anchor" aria-hidden="true">#</span>方法说明.</a></strong> <span>这些数据的收集方式。</span></h2>
+  <dl data-component="methodology-list">
+    <div><dt>更新</dt><dd>每次打开页面实时聚合。<strong id="method-window">—</strong> 的日线，按本地时区划分。</dd></div>
+    <div><dt>Token</dt><dd>每个请求的输入、输出、缓存读与缓存写 token，取上游返回的 usage 字段。</dd></div>
+    <div><dt>用户和会话</dt><dd>独立用户按成员去重。会话是近似值：同一成员同一模型相隔 30 分钟内的请求算同一次会话。</dd></div>
+    <div><dt>成本</dt><dd>每个请求按结算时记下的单价逐条计成本，口径是「未命中缓存的输入 × 输入价 + 命中缓存的输入 × 缓存价 + 输出 × 输出价」，单位人民币。Token 成本那一节显示的是这个实付总成本除以总 token，所以缓存命中的次数会直接把单价拉低：命中价通常只有输入价的百分之几，一个命中率 96% 的模型，实付均价能低到牌价的十分之一。悬停任意一行可以看到三档牌价与实付均价。</dd></div>
+    <div><dt>留存率</dt><dd>某一周使用某模型的成员中，下一周再次使用该模型的比例。样本量写在同一行的右侧。</dd></div>
+    <div><dt>隐私</dt><dd>只统计计费元数据。成员以「成员 01」这样的序号出现，不显示姓名、邮箱或密钥。</dd></div>
+    <div><dt>引用</dt><dd>引用时请注明 Prometheus API Data（api.hhy.homes/data）以及页面顶部显示的更新时间。</dd></div>
+  </dl>
+</section>
+
+<section id="model-comparison" data-section="compare-home-related">
+  <h2 data-slot="section-title"><strong>模型对比.</strong> <span>根据排行榜组合出的常用模型对照。</span></h2>
+  <div data-component="compare-home-card-grid" id="compare-grid"></div>
+</section>
+
+</div>
+
+<footer data-component="footer">
+  <div data-slot="footer-pattern" aria-hidden="true"></div>
+  <div data-slot="footer-bottom">
+    <div>
+      <span>© <span id="year">2026</span> Prometheus Lab</span>
+      <span data-slot="status">所有系统运行正常</span>
+    </div>
+  </div>
+</footer>
+</div>
+</main>
+
+<script type="module" src="/assets/data.js"></script>
+</body>
+</html>

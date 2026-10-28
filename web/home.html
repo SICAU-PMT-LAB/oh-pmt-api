@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<script>
+  /* 首屏前套用存过的主题，避免先渲染亮色再跳暗色 */
+  try {
+    var t = localStorage.getItem('pmt_site_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prometheus API | 川农人的 AI 模型接入</title>
+<meta name="description" content="Prometheus Lab 社团提供的模型服务：DeepSeek、GLM、MiniMax、Kimi、MiMo 等旗舰模型，OpenAI 兼容接口，配额按日与周计。">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/assets/logo-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/logo-180.png">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body data-page="site">
+<div class="pmt-backdrop" aria-hidden="true">
+  <div class="pmt-backdrop-nebula"></div>
+  <svg class="pmt-backdrop-stars" viewBox="0 0 1440 900"
+       preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<canvas class="pmt-backdrop-grid" aria-hidden="true"></canvas>
+
+<main data-page="opencode">
+<div data-component="container">
+  <section data-component="top">
+    <a class="logo" href="/" aria-label="Prometheus API 首页">
+      <span class="wordmark">PROMETHEUS<span class="wm-suffix">&nbsp;API</span></span>
+    </a>
+    <nav data-component="nav-desktop">
+      <ul>
+        <li><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="/data">Data</a></li>
+        <li><a href="/plan">Plan</a></li>
+      </ul>
+    </nav>
+    <!-- 主题与登录不放在 nav-desktop 里：那个导航在手机上整体隐藏，
+         放进去等于手机上没法切明暗。 -->
+    <div data-slot="top-actions">
+      <button data-slot="theme-toggle" type="button" id="theme-toggle"
+              aria-label="切换明暗主题" title="切换明暗主题"></button>
+      <a data-slot="cta-button" href="/login">
+        登录
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <path d="M6.75 4.5V3a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-.75.75h-6A.75.75 0 0 1 6.75 15v-1.5M9.75 9H2.25M9.75 9 7 6.25M9.75 9 7 11.75"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/>
+        </svg></a>
+      <nav data-component="nav-mobile">
+        <button type="button" data-component="nav-mobile-toggle" aria-expanded="false"
+                aria-controls="nav-mobile-menu" class="nav-toggle" aria-label="打开菜单">
+          <span class="sr-only">打开菜单</span>
+          <svg class="icon icon-hamburger" width="24" height="24" viewBox="0 0 24 24"
+               fill="none" aria-hidden="true">
+            <path d="M19 8H5V7H19V8Z" fill="currentColor"/>
+            <path d="M19 17H5V16H19V17Z" fill="currentColor"/>
+          </svg>
+          <svg class="icon icon-close" width="24" height="24" viewBox="0 0 24 24"
+               fill="none" aria-hidden="true">
+            <path d="M7.1 7.8 12 12.7l4.9-4.9.7.7-4.9 4.9 4.9 4.9-.7.7-4.9-4.9-4.9 4.9-.7-.7 4.9-4.9L7.1 7.8Z"
+                  fill="currentColor"/>
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </section>
+  <div id="nav-mobile-menu" data-component="nav-mobile-menu-list" hidden>
+    <ul>
+      <li><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="/docs">Docs</a></li>
+      <li><a href="/data">Data</a></li>
+      <li><a href="/plan">Plan</a></li>
+      <li><a href="/login">登录</a></li>
+    </ul>
+  </div>
+
+  <div data-component="content">
+    <section data-component="hero">
+      <div data-slot="hero-copy">
+        <h1>OH-PROMETHEUS-API !</h1>
+        <p>提供多家旗舰模型，可选择任意模型，包括 DeepSeek, GLM, MiniMax 等。</p>
+      </div>
+    </section>
+
+    <!-- 演示视频：文件存在时用 <video>，不存在时退成占位画面 -->
+    <section data-component="video-placeholder" id="video-slot">
+      <div class="vp-inner">
+        <div class="vp-mark">PROMETHEUS</div>
+        <div class="vp-play">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path d="M6.5 4.5 13 9l-6.5 4.5v-9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>演示视频</div>
+      </div>
+    </section>
+
+    <section data-component="what">
+      <div data-slot="section-title">
+        <h3>什么是 Prometheus API？</h3>
+        <p>由 Prometheus Lab 社团提供给社团成员，以及川农学生的 token 服务。帮助您在终端、IDE 或桌面端获得主流 AI 模型的助力。</p>
+      </div>
+      <ul>
+        <li><span>[*]</span><div><strong>免费额度</strong>提供 Go，Plus，Pro，Max 档位。<a href="/plan">详情见 Plan</a>。</div></li>
+        <li><span>[*]</span><div><strong>任意模型</strong>支持 <code>deepseek-v4.1-flash</code>，<code>step-5-preview</code>，<code>xiaomi-mimo-v2.6-pro</code> 等。</div></li>
+        <li><span>[*]</span><div><strong>任意编辑器</strong>支持主流 harness 应用，推荐搭配 <a href="https://pi.dev" target="_blank" rel="noopener">Pi-Agent</a> 使用。</div></li>
+      </ul>
+      <a class="cta" href="/docs">
+        <span>阅读 Docs</span>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6.5 12L17 12M13 16.5L17.5 12L13 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/>
+        </svg>
+      </a>
+    </section>
+
+    <section data-component="privacy">
+      <div data-slot="privacy-title">
+        <h3>隐私优先</h3>
+        <div>
+          <span>[*]</span>
+          <p>Prometheus 社团保障不主动存储您的任何代码或上下文数据，确保可以在对隐私敏感的环境中运行。<a href="/docs#privacy">了解更多关于隐私</a>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section data-component="faq">
+      <div data-slot="section-title"><h3>常见问题</h3></div>
+      <ul id="faq"></ul>
+    </section>
+
+    <section data-component="zen-cta">
+      <div data-slot="zen-cta-copy">
+        <strong>来自 Prometheus Lab 的模型配额</strong>
+        <p>按日与周两个窗口计算额度，额度用满前所有请求都按真实 token 计。公益站，不收费，也不会在月末突然中断。</p>
+        <a class="cta" href="/plan">
+          <span>查看 Plan</span>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6.5 12L17 12M13 16.5L17.5 12L13 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/>
+          </svg>
+        </a>
+      </div>
+    </section>
+
+    <section data-component="email">
+      <div data-slot="section-title">
+        <h3>第一时间获知我们的更新消息</h3>
+        <p>加入候补名单，获取抢先体验资格。</p>
+      </div>
+      <form data-slot="form" id="waitlist">
+        <input type="email" name="email" placeholder="电子邮箱地址" aria-label="电子邮箱地址" required>
+        <button type="submit">订阅</button>
+      </form>
+      <div data-slot="form-note" id="waitlist-note"></div>
+    </section>
+
+    <footer data-component="footer">
+      <div data-slot="cell"><a href="https://api.hhy.homes" target="_blank" rel="noopener">GitHub</a></div>
+      <div data-slot="cell"><a href="/docs">Docs</a></div>
+      <div data-slot="cell"><a href="/data">Data</a></div>
+      <div data-slot="cell"><a href="/plan">Plan</a></div>
+      <div data-slot="cell"><a href="/login">登录</a></div>
+    </footer>
+  </div>
+</div>
+
+<div data-component="legal">
+  <span>© <span id="year">2026</span> Prometheus Lab</span>
+  <span><a href="/docs">Docs</a></span>
+  <span><a href="/plan">Plan</a></span>
+  <span><a href="/data">Data</a></span>
+</div>
+</main>
+
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/theme-toggle.js"></script>
+<script type="module">
+import { initMobileNav } from '/assets/nav-mobile.js';
+initMobileNav();
+</script>
+<script type="module">
+import { initWordmarkScroll } from '/assets/wordmark.js';
+// 字标滚动折叠：越过 120px 后 PROMETHEUS LAB 收成 PMT
+initWordmarkScroll(document.querySelector('.wordmark'));
+</script>
+<script type="module">
+/* ---------- FAQ ---------- */
+const FAQ = [
+  ['什么是 Prometheus Lab？',
+   'Prometheus Lab 是四川农业大学的 AI 社团。<a href="https://api.hhy.homes">深入了解？</a>'],
+  ['是免费的吗？',
+   '是的。社团提供免费但限额的 api 服务，通过指定方式可连接任意 Agent。（注：社团优先支持 Pi Agent 的正常使用。）'],
+  ['什么人可以使用？',
+   '川农在校学生与 Prometheus Lab 社团成员。'],
+  ['如何使用 Token？',
+   '教程见<a href="https://api.hhy.homes">首次调用 API</a>。'],
+  ['我可以在 xx 平台使用吗？',
+   '目前 API 测试证明能适配大多数主流 Agent。'],
+  ['数据和隐私保护如何？',
+   '社团承诺不主动存储您的任何代码或上下文数据，保障您的数据安全。'],
+  ['我可以把 api-key 分享给别人使用吗？',
+   '不可以！请遵守<a href="https://api.hhy.homes">Honor Code</a>。如检测到违规使用，社团有权对账号进行永久封禁（可以尝试找下一任负责人解封🤨）。'],
+];
+
+const faqRoot = document.getElementById('faq');
+FAQ.forEach(([q, a], i) => {
+  const li = document.createElement('li');
+  const id = `faq-${i}`;
+  li.innerHTML = `
+    <div data-slot="faq-item" data-closed id="${id}">
+      <button type="button" aria-expanded="false" data-closed data-slot="faq-question">
+        <svg data-slot="faq-icon-plus" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.5 11.5H19V12.5H12.5V19H11.5V12.5H5V11.5H11.5V5H12.5V11.5Z"/></svg>
+        <svg data-slot="faq-icon-minus" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 11.5H19V12.5H5Z"/></svg>
+        <div data-slot="faq-question-text">${q}</div>
+      </button>
+      <div id="${id}-content" data-closed data-slot="faq-answer">${a}</div>
+    </div>`;
+  li.querySelector('button').addEventListener('click', () => {
+    const item = li.querySelector('[data-slot="faq-item"]');
+    const open = item.hasAttribute('data-expanded');
+    item.toggleAttribute('data-expanded', !open);
+    item.toggleAttribute('data-closed', open);
+    li.querySelector('[data-slot="faq-answer"]').toggleAttribute('data-closed', open);
+    li.querySelector('button').setAttribute('aria-expanded', String(!open));
+  });
+  faqRoot.appendChild(li);
+});
+
+/* ---------- 移动端菜单 ---------- */
+/* 展开/收起、图标换形、点击区域与 Esc 都在 /assets/nav-mobile.js 里，
+   官网三个页面和后台三个面板共用同一份。 */
+
+/* ---------- 演示视频插槽 ---------- */
+/* 把演示视频放到 web/assets/demo.mp4（或 demo.webm）就会自动换上；
+   没有文件时保留上面的占位画面，不会出现破图。 */
+fetch('/assets/demo.mp4', { method: 'HEAD' }).then((r) => {
+  if (!r.ok) return;
+  const slot = document.getElementById('video-slot');
+  const video = document.createElement('video');
+  video.src = '/assets/demo.mp4';
+  video.autoplay = true; video.muted = true; video.loop = true;
+  video.playsInline = true; video.preload = 'auto';
+  slot.replaceWith(video);
+  video.setAttribute('data-component', 'video');
+}).catch(() => {});
+
+/* ---------- 年份 ---------- */
+document.getElementById('year').textContent = new Date().getFullYear();
+
+/* ---------- 订阅表单 ---------- */
+document.getElementById('waitlist').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const note = document.getElementById('waitlist-note');
+  note.textContent = '已记录。开放注册时我们会用这个邮箱通知你。';
+  ev.target.reset();
+});
+</script>
+</body>
+</html>
+
+<script type="module">
+  import { mountBackdrop } from '/assets/backdrop.js';
+  mountBackdrop();
+</script>
