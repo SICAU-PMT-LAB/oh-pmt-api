@@ -474,6 +474,14 @@ form.addEventListener('submit', async (ev) => {
       setState('exit');
       panel.classList.remove('enter');
       lanyard.flipTarget = false;
+      // 还在用初始密码就先留个标记，跳过去的页面据此弹一次提醒。
+      // 存在这里而不是每次问服务端，是为了「弹一次」——改完密码自然就不再弹。
+      try {
+        if (data.must_change_password)
+          localStorage.setItem('pmt_must_change_pw', '1');
+        else
+          localStorage.removeItem('pmt_must_change_pw');
+      } catch (e) { /* 隐私模式下写不了，最多不弹 */ }
       setTimeout(() => { location.href = data.redirect || '/me'; }, 420);
       return;
     }

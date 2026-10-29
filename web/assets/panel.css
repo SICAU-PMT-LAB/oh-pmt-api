@@ -188,12 +188,18 @@ body[data-page="site"] .brand:focus {
   color: var(--p-text-3);
 }
 
-/* 分区导航：横向排开，激活项用下划线而不是色块 */
+/* 分区导航：横向排开，在整条顶栏里居中，激活项用下划线而不是色块。
+   用绝对定位而不是 flex:1 撑满中间那段：成员控制台的标志旁边还有一块
+   身份信息（.who-inline），按剩余空间居中会把它往右推，两个页面切来
+   切去导航位置不一样。绝对定位是相对这条 sticky 顶栏算的，跟两侧宽度无关。 */
 #nav {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 22px;
-  margin-right: auto;
+  gap: 30px;
+  max-width: calc(100% - 22rem);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -204,8 +210,8 @@ body[data-page="site"] .brand:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
-  font-size: 12.5px;
+  padding: 6px 0;
+  font-size: 15px;
   color: var(--p-text-2);
   text-decoration: none;
   white-space: nowrap;
@@ -1468,6 +1474,9 @@ body[data-page="site"] .pmt-backdrop-stars { opacity: 0.28; }
   gap: 1px;
   padding-left: 16px;
   margin-left: 4px;
+  /* 必须在右侧吃掉剩余空间，否则顶栏的 space-between 会把它居中，
+     跟绝对居中的 #nav 撞在一起。 */
+  margin-right: auto;
   border-left: 1px solid var(--p-line);
   font-size: 11.5px;
   line-height: 1.35;

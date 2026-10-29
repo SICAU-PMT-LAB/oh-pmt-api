@@ -1317,6 +1317,10 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.dumps({
             "ok": True, "is_admin": bool(member.get("is_admin")),
             "name": member["name"], "redirect": "/admin" if member.get("is_admin") else "/me",
+            # 密码还是初始密码时，前端登录后弹一次改密码提醒。判断依据就是
+            # 明文是否等于 DEFAULT_PASSWORD：不加标记列，重置与新建都落在这
+            # 一个值上，比对一次即可，也不会因为别的字段变动而失效。
+            "must_change_password": password == DEFAULT_PASSWORD,
         }).encode()
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()

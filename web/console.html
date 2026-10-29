@@ -213,27 +213,15 @@
       </div>
 
       <div class="card">
-        <div class="card-head"><h3>账号</h3></div>
+        <div class="card-head">
+          <h3>账号</h3>
+          <span class="spacer"></span>
+          <button class="btn small" id="btn-pw">修改密码</button>
+        </div>
         <div class="acct">
           <div class="row">
             <label>登录账号</label>
             <div class="mono" id="acct-user" style="font-size:12.5px">—</div>
-          </div>
-          <div class="row">
-            <label for="pw-old">原密码</label>
-            <input id="pw-old" type="password" autocomplete="current-password">
-          </div>
-          <div class="row">
-            <label for="pw-new">新密码</label>
-            <input id="pw-new" type="password" autocomplete="new-password">
-          </div>
-          <div class="row">
-            <label for="pw-new2">再输一次</label>
-            <input id="pw-new2" type="password" autocomplete="new-password">
-          </div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <button class="btn small primary" id="btn-pw">修改密码</button>
-            <span class="hint" id="pw-msg"></span>
           </div>
         </div>
       </div>
@@ -431,6 +419,51 @@
     <div class="modal-actions">
       <button class="btn" data-close="mk-key">取消</button>
       <button class="btn primary" id="mk-submit">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改密码：从账号卡片的按钮唤起，不再常驻占位置 -->
+<div class="modal-mask" id="pw-modal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-scroll">
+      <h3>修改密码</h3>
+      <div class="field" style="margin-bottom:14px">
+        <label for="pw-old">原密码</label>
+        <input id="pw-old" type="password" autocomplete="current-password">
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="pw-new">新密码</label>
+        <input id="pw-new" type="password" autocomplete="new-password"
+               placeholder="至少 6 位">
+      </div>
+      <div class="field">
+        <label for="pw-new2">再输一次</label>
+        <input id="pw-new2" type="password" autocomplete="new-password">
+      </div>
+      <div class="hint" id="pw-msg" style="margin-top:10px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-close="pw-modal">取消</button>
+      <button class="btn primary" id="pw-submit">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 还在用初始密码：登录后弹一次，改完就不再出现 -->
+<div class="modal-mask" id="pw-notice">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-scroll">
+      <h3>请先改掉初始密码</h3>
+      <div class="notice">
+        <span class="ico">i</span>
+        <span>你现在用的还是管理员设置的初始密码。别人知道这个密码就能
+              登进你的控制台、看到你的密钥前缀和用量，建议马上换掉。</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-close="pw-notice">稍后</button>
+      <button class="btn primary" id="pw-notice-go">现在修改</button>
     </div>
   </div>
 </div>
@@ -979,22 +1012,39 @@ async function deleteKey(id, name) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// 修改密码在弹窗里完成。成功后就地提示并关闭，不再像以前那样
+// 在页面底部常驻一份表单占着位置。
 async function savePassword() {
   const oldPw = document.getElementById('pw-old').value;
   const newPw = document.getElementById('pw-new').value;
   const again = document.getElementById('pw-new2').value;
   const msg = document.getElementById('pw-msg');
+  msg.textContent = '';
   if (newPw !== again) { msg.textContent = '两次输入的新密码不一致'; return; }
   if (newPw.length < 6) { msg.textContent = '新密码至少 6 位'; return; }
+  const btn = document.getElementById('pw-submit');
+  btn.disabled = true;
   try {
     await api('/api/me/password', {
       method: 'POST',
       body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
     });
-    msg.textContent = '已更新';
     ['pw-old', 'pw-new', 'pw-new2'].forEach(id =>
       document.getElementById(id).value = '');
+    closeModal('pw-modal');
+    toast('密码已更新');
   } catch (e) { msg.textContent = e.message; }
+  btn.disabled = false;
+}
+
+// 还在用初始密码时，进来先提醒一次。判断来自登录响应里存下的标记，
+// 改完密码这个标记就落到 localStorage 之外——下次登录服务端不再说
+// 「还要改」，也就不会再弹。
+function maybePromptPassword() {
+  let need = false;
+  try { need = localStorage.getItem('pmt_must_change_pw') === '1'; } catch (e) {}
+  if (!need) return;
+  openModal('pw-notice');
 }
 
 /* ───────── 事件（全部走委托，内容每次都是新节点） ───────── */
@@ -1002,7 +1052,18 @@ document.addEventListener('click', async e => {
   const t = e.target;
 
   if (t.id === 'btn-refresh') { load(); return; }
-  if (t.id === 'btn-pw') { savePassword(); return; }
+  if (t.id === 'btn-pw') {
+    document.getElementById('pw-msg').textContent = '';
+    openModal('pw-modal');
+    return;
+  }
+  if (t.id === 'pw-submit') { savePassword(); return; }
+  if (t.id === 'pw-notice-go') {
+    closeModal('pw-notice');
+    document.getElementById('pw-msg').textContent = '';
+    openModal('pw-modal');
+    return;
+  }
   if (t.id === 'mk-submit') { submitNewKey(); return; }
   if (t.closest('[data-close]')) {
     closeModal(t.closest('[data-close]').dataset.close);
@@ -1114,6 +1175,7 @@ function route() {
 addEventListener('hashchange', route);
 route();
 load();
+maybePromptPassword();
 </script>
 </body>
 </html>
