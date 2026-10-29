@@ -75,6 +75,14 @@ class UpstreamError(Exception):
         """
         return False
 
+    @property
+    def is_model_missing(self) -> bool:
+        """这个账号没有这个模型（11102），账号本身没问题。
+
+        默认 False：只有明确知道有这类错误的上游才覆写它。
+        """
+        return False
+
     def retry_after(self) -> int:
         """上游要求等待的秒数，拿不到就给 30。"""
         import re

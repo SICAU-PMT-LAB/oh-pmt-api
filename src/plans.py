@@ -186,6 +186,7 @@ def catalog(models: dict, overrides: dict | None = None) -> list[dict]:
         price, kind = pricing.lookup(upstream or mid, name, mid, overrides)
         profile, profile_src = profile_for(upstream, mid, name)
         per_req = tokens_per_request(profile)
+        welfare_only = bool(meta.get("welfare_only"))
         row = {
             "id": mid,
             "name": name,
@@ -202,14 +203,24 @@ def catalog(models: dict, overrides: dict | None = None) -> list[dict]:
             "tokens_per_request": per_req,
             "session_cost": round(session_cost(price, profile), 8),
             "cost_per_mtok": round(cost_per_mtok(price, profile), 4),
-            "daily": {p["slug"]: requests_for_budget(
-                p["daily"], price, profile) for p in PLANS},
-            "weekly": {p["slug"]: requests_for_budget(
-                p["weekly"], price, profile) for p in PLANS},
+            # 福利来源：这个模型的每一条来源都是福利账号（不扣额度）。
+            # 前端据此在预测图上把它标成「临时 · 额度无限」。混合来源的
+            # 模型不算——它还有正常账号在跑，额度照常受限。
+            "welfare": bool(meta.get("welfare_only")),
+            # 只由福利账号提供的模型不扣成员额度，请求次数就是无限。
+            # 用 None 表示，和「单价为 0 的免费模型」同一种表示法。
+            "daily": ({p["slug"]: None for p in PLANS} if welfare_only else
+                      {p["slug"]: requests_for_budget(
+                          p["daily"], price, profile) for p in PLANS}),
+            "weekly": ({p["slug"]: None for p in PLANS} if welfare_only else
+                       {p["slug"]: requests_for_budget(
+                           p["weekly"], price, profile) for p in PLANS}),
             # 每周能烧掉的 token 总量 = 每周请求数 × 每请求 token
-            "weekly_tokens": {p["slug"]: _weekly_tokens(
-                requests_for_budget(p["weekly"], price, profile), per_req)
-                for p in PLANS},
+            "weekly_tokens": ({p["slug"]: None for p in PLANS}
+                              if welfare_only else
+                              {p["slug"]: _weekly_tokens(
+                                  requests_for_budget(p["weekly"], price, profile),
+                                  per_req) for p in PLANS}),
         }
         rows.append(row)
     # 排序：额度升序，能跑的次数少的排前面。免费模型没有次数上限，排最前

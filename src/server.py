@@ -23,6 +23,7 @@ import labs
 import plans
 import pricing
 import providers
+import welfare
 import qoder
 import workbuddy
 from store import DEFAULT_MODELS, Store, day_start
@@ -179,6 +180,10 @@ def login_ok(ip: str):
 # 排队时网关自己等，不把 429 甩给客户端（客户端重试几次就放弃了）
 QUEUE_MAX_WAIT = 180      # 最多等这么多秒
 QUEUE_MAX_ROUNDS = 6      # 最多重试这么多轮
+# 单个账号同时承接的请求数上限。超过就把后续请求分给别的账号：一个账号
+# 同时压太多请求，上游会直接按限流处理，成员看到的是排队和失败，反而比
+# 分摊到两个账号慢。分摊的单位是账号，不是厂商或成员。
+ACCOUNT_CONCURRENCY = 5
 # 请求体上限。长上下文对话可能有几 MB，给到 32 MB 足够；
 # 不设上限时一个声明了巨大 Content-Length 的请求就能吃光内存。
 MAX_BODY_BYTES = 32 * 1024 * 1024
@@ -222,6 +227,11 @@ def ensure_fresh_token(account: dict) -> dict:
     不依赖短期凭据的厂商（适配器直接返回空）原样返回账号。
     """
     prov = providers.get(account.get("provider"))
+    # 福利账号的凭证是长期 API Key，不过期也没有续期这回事。expires_at
+    # 可以就是 0，不能因为它是 0 就去 try "刷新"——那会掉进下面那个
+    # refresh→connect 的回退分支，白白多两次上游请求。
+    if prov.needs_base_url:
+        return account
     if account["expires_at"] and account["expires_at"] - time.time() > 300:
         return account
     if not prov.available:
@@ -243,7 +253,6 @@ def ensure_fresh_token(account: dict) -> dict:
             new = {"access_token": ex["access_token"],
                    "refresh_token": ex["refresh_token"],
                    "expires_in": ex.get("expires_in", 86400)}
-
         expires_at = time.time() + int(new.get("expires_in") or 86400)
         get_store().set_account_tokens(
             acc["id"], new["access_token"], new.get("refresh_token", ""), expires_at
@@ -438,6 +447,16 @@ def provider_label(slug: str) -> str:
     return prov.label if prov else (slug or "未分配账号")
 
 
+def _rank_num(prov, region: str) -> float:
+    """把两段档位压成一个可排序的数，账号页和一个厂商多区域时都用它。
+
+    两位整数分开取，主档位差一级就整体压过区域差一级：workbuddy 国际
+    (2,3) 排在 Qoder 国内 (6,5) 前面，符合「先按厂商、再按区域」。
+    """
+    a, b = prov.rank(region)
+    return a * 10 + b
+
+
 def provider_color(slug: str) -> str:
     prov = providers.PROVIDERS.get((slug or "").strip())
     return prov.color if prov else "#8c8677"
@@ -511,9 +530,15 @@ def all_models() -> dict[str, dict]:
                 hit["routes"].append(route)
     # 同名模型只要有一家已被下架就整条不展示：客户端看到的是一个名字，
     # 不能“这家能跑那家已下线”让人猜。
-    return {mid: meta for mid, meta in out.items()
+    live = {mid: meta for mid, meta in out.items()
             if not any(pricing.retired(r["model"], meta.get("name"), mid)
                        for r in meta["routes"])}
+    # 标出「只由福利账号提供」的模型：这类模型的额度是无限的，plan 页要
+    # 单独标临时；混合来源的不标——那种模型还有正常账号在跑，额度照常受限。
+    for meta in live.values():
+        meta["welfare_only"] = all(
+            r["provider"] == "welfare" for r in meta.get("routes") or [])
+    return live
 
 
 def stable_model_names(store=None) -> dict[str, str]:
@@ -1025,6 +1050,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._auth_admin():
                     return
                 return self._import_accounts()
+            # 福利账号：先探测可用模型，管理员现场选完再落库
+            if path == "/api/welfare/probe":
+                if not self._auth_admin():
+                    return
+                return self._welfare_probe()
+            if path == "/api/welfare/import":
+                if not self._auth_admin():
+                    return
+                return self._welfare_import()
             if path == "/api/accounts/action":
                 if not self._auth_admin():
                     return
@@ -1359,7 +1393,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # 现在知道是哪个模型了，查它的单模型额度。放在 check_model 之后：
         # 没开的模型该报 model_forbidden，而不是泄露出它有额度。
-        # 只查这一个：日/总额度（不分模型）在读 body 之前已查过。
+        # 只查这一个：日/周额度（不分模型）在读 body 之前已查过。
         try:
             guard.check_model_quota(
                 store, member, key,
@@ -1389,30 +1423,29 @@ class Handler(BaseHTTPRequestHandler):
                        "model": model}]
         want = meta.get("region") or ("cn" if model.endswith("-cn") else "global")
         chosen: dict | None = None
-        for route in routes:
-            cand = providers.get(route["provider"])
-            # 优先账号只在它自己的账号池里找，不按路由的区域过滤：成员绑的是
-            # 某个具体账号，路由上的区域只是默认值。选了跨区域的账号之后，
-            # want 必须跟着走，否则后续换账号会又跑回默认区域。
-            hit = store.pick_account(route["region"], provider=cand.slug,
-                                     prefer_id=prefer)
+        # 账号池按优先级一档一档找：workbuddy 国内 → 其他渠道 →
+        # workbuddy 国际 → 福利 → qoder 国内 → qoder 国际。routes 是白名单
+        # 允许的来源（决定能不能用），档次决定先试谁（决定优先用谁）。
+        #
+        # 优先账号仍然排在最前面，但它必须属于这个模型允许的来源之一：
+        # 成员绑的账号如果根本跑不了这个模型，按它去选只会选到就跑不动。
+        for cand, region, route_model in self._account_ladder(
+                store, routes, prefer, model, meta):
+            # 优先账号不按区域过滤：成员绑的是某个具体账号，路由上的区域
+            # 只是默认值。选了跨区域的账号之后 want 必须跟着走，否则后续
+            # 换账号会又跑回默认区域。
+            hit = store.pick_account(region, provider=cand.slug,
+                                     prefer_id=prefer, model=route_model,
+                                     capacity=ACCOUNT_CONCURRENCY)
             if hit is None:
-                for alt in cand.regions:
-                    if alt == route["region"]:
-                        continue
-                    hit = store.pick_account(alt, provider=cand.slug,
-                                             prefer_id=prefer)
-                    if hit is not None:
-                        route = {**route, "region": alt}
-                        break
-            if hit is not None:
-                account, provider = hit, cand
-                want = hit.get("region") or route["region"]
-                # 每家上游认的模型 key 不同，按实际选中的厂商换回它自己的 key
-                model = route["model"]
-                ctx["model"] = model
-                chosen = route
-                break
+                continue
+            account, provider = hit, cand
+            want = hit.get("region") or region
+            model = route_model
+            ctx["model"] = model
+            chosen = {"provider": cand.slug, "model": route_model,
+                      "region": region}
+            break
         if account is None:
             if not routes:
                 # 白名单把这个模型的每一家来源都关掉了
@@ -1422,12 +1455,21 @@ class Handler(BaseHTTPRequestHandler):
             return fail(503, "no_account",
                         self._no_account_reason(first, routes[0]["region"]))
         ctx["account_id"] = account["id"]
+        # 占一个在途位，选号时据此把并发分摊到别的账号上。
+        # 下面的 finally 一定会释放，包括提前 return 的分支。
+        store.enter_account(account["id"])
 
         # 这次请求允许走的其他来源。当前厂商的账号全部不可用时（冷却、排队、
         # 连不上、额度不够），换到下一家厂商重连同一个模型：对客户端仍然是
         # 一个模型名、一条流。
-        pending = [r for r in routes
-                   if not (r["provider"] == provider.slug and r is chosen)]
+        # 按「厂商 + 区域」比对而不是用 `is`：上面跨区域重选时 route 会被
+        # 换成 {**route, ...} 的新字典，用身份比对就认不出来了，当前厂商会
+        # 留在 pending 里，后续还能再回到同一家、按默认区域重选一个账号。
+        def same_route(a: dict, b: dict | None) -> bool:
+            return (b is not None and a["provider"] == b["provider"]
+                    and a["model"] == b["model"])
+
+        pending = [r for r in routes if not same_route(r, chosen)]
         tried = {account["id"]}
 
         def build_payload(prov, model_key: str) -> bytes:
@@ -1464,32 +1506,35 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         def switch_vendor():
-            """换到下一个还能用的厂商，返回新的一组运行状态；换不了返回 None。
+            """换到下一家还能用的厂商，返回新的一组运行状态；换不了返回 None。
 
             返回 (account, provider, payload, model, want)，调用方直接解包。
+
+            顺序按账号池档位走同一条阶梯，而不是按目录里厂商的书写顺序：
+            主力的那一档换完了才轮到下一档，不至于因为目录顺序把一个额度
+            紧张的备用厂商排到前面。
             """
             while pending:
                 route = pending.pop(0)
-                cand = providers.get(route["provider"])
-                hit = store.pick_account(route["region"], provider=cand.slug,
-                                         prefer_id=prefer, exclude=tried)
-                if hit is None:
-                    for alt in cand.regions:
-                        if alt == route["region"]:
-                            continue
-                        hit = store.pick_account(alt, provider=cand.slug,
-                                                 prefer_id=prefer, exclude=tried)
-                        if hit is not None:
-                            route = {**route, "region": alt}
-                            break
-                if hit is None:
-                    continue
-                tried.add(hit["id"])
-                ctx["model"] = route["model"]
-                ctx["account_id"] = hit["id"]
-                fresh = ensure_fresh_token(hit)
-                return (fresh, cand, build_payload(cand, route["model"]),
-                        route["model"], hit.get("region") or route["region"])
+                # 已经在本厂商/本区域试过的账号不重复试
+                hit = None
+                for cand, region, route_model in self._account_ladder(
+                        store, [route], prefer, route["model"], meta):
+                    if cand.slug != route["provider"]:
+                        # 优先账号属于别家时不在这轮考虑，交给对应那轮
+                        continue
+                    hit = store.pick_account(
+                        region, provider=cand.slug, prefer_id=prefer,
+                        exclude=tried, model=route_model,
+                        capacity=ACCOUNT_CONCURRENCY)
+                    if hit is None:
+                        continue
+                    tried.add(hit["id"])
+                    ctx["model"] = route_model
+                    ctx["account_id"] = hit["id"]
+                    fresh = ensure_fresh_token(hit)
+                    return (fresh, cand, build_payload(cand, route_model),
+                            route_model, hit.get("region") or region)
             return None
 
         def switch_account(exclude: set[int]):
@@ -1497,11 +1542,17 @@ class Handler(BaseHTTPRequestHandler):
 
             优先级高的是同一个区域的账号；区域类错误（国际版要求首条必须是
             system）在同一区域重试没用，所以区域以外也找一轮。
+
+            这里必须带上 prefer：成员绑了账号就优先回到它。之前这个函数
+            只传区域，所以每次排队/额度/渠道拒绝重试都会落到同厂商的
+            LRU 账号上，形成「换完就不回来」的漂移。
             """
             order = [want] + [r for r in provider.regions if r != want]
             for region in order:
                 hit = store.pick_account(region, provider=provider.slug,
-                                         exclude=exclude)
+                                         prefer_id=prefer, exclude=exclude,
+                                         model=model,
+                                         capacity=ACCOUNT_CONCURRENCY)
                 if hit is not None:
                     return hit
             return None
@@ -1542,14 +1593,18 @@ class Handler(BaseHTTPRequestHandler):
                             spare = switch_account(tried)
                             if spare is not None:
                                 tried.add(spare["id"])
+                                store.leave_account(account["id"])
                                 account = ensure_fresh_token(spare)
+                                store.enter_account(account["id"])
                                 want = account.get("region") or want
                                 ctx["account_id"] = account["id"]
                                 continue
                             # 这家没账号可换了，换一家厂商重连同一个模型
                             swapped = switch_vendor()
                             if swapped:
+                                store.leave_account(account["id"])
                                 account, provider, payload, model, want = swapped
+                                store.enter_account(account["id"])
                                 break
                         if not wait:
                             ready = True
@@ -1585,15 +1640,35 @@ class Handler(BaseHTTPRequestHandler):
                         if spare is None:
                             raise
                         tried.add(spare["id"])
+                        store.leave_account(account["id"])
                         account = ensure_fresh_token(spare)
+                        store.enter_account(account["id"])
                         want = account.get("region") or want
                         ctx["account_id"] = account["id"]
                         continue
+                    # 这个账号没有这个模型（11102）：只冻结这一个模型，
+                    # 然后换同厂商的账号。不同渠道模型集合不一样，同一个
+                    # 模型只在部分账号上存在是常态。绝不能走账号级冷却——
+                    # 那会把其他成员对**别的模型**的请求一起撞走。
+                    if e.is_model_missing:
+                        store.set_model_cooldown(
+                            account["id"], model, 600, str(e.body)[:500])
+                        spare = switch_account(tried)
+                        if spare is not None:
+                            tried.add(spare["id"])
+                            store.leave_account(account["id"])
+                            account = ensure_fresh_token(spare)
+                            store.enter_account(account["id"])
+                            want = account.get("region") or want
+                            ctx["account_id"] = account["id"]
+                            continue
                     # 其他错误（连不上、凭证失效、限流）先看能不能换厂商
                     swapped = switch_vendor()
                     if not swapped:
                         raise
+                    store.leave_account(account["id"])
                     account, provider, payload, model, want = swapped
+                    store.enter_account(account["id"])
 
             # 首帧已经被取出来判断过是否排队，要放回流的开头。
             # 这里必须用默认参数固定住上游迭代器：写成闭包直接引用 lines
@@ -1627,6 +1702,12 @@ class Handler(BaseHTTPRequestHandler):
                 # 请求内容被上游拦下：账号是好的，换账号重发也一样被拦，
                 # 所以不加冷却也不重试。原因要说给客户端，但不能带上游原文。
                 code, msg, wait = "upstream_rejected", "请求被上游拒绝，请调整请求内容后重试", 0
+            elif getattr(e, "is_model_missing", False):
+                # 到这一步说明同厂商已经没有别的账号能接（上面的循环已经
+                # 试过一圈）。仍然只冻结模型：账号对**别的**模型是好的，
+                # 冻结账号会让其他成员的正常请求一起被撞走。
+                store.set_model_cooldown(account["id"], model, 600, detail)
+                code, msg, wait = "model_unavailable", "该模型在当前账号池不可用，请稍后重试", 0
             else:
                 store.set_account_cooldown(account["id"], 60, detail)
                 code, msg, wait = "upstream_error", "上游服务出错，请稍后重试", 0
@@ -1682,6 +1763,13 @@ class Handler(BaseHTTPRequestHandler):
                 completion_tokens=holder["completion_tokens"],
                 cache_read_tokens=holder["cache_read"],
                 cache_write_tokens=holder["cache_write"])
+            # 福利账号：请求照常计量（token 都记），但不扣成员额度。
+            # 按账号的 welfare 标记判，不按厂商名——同一家上游将来也可能
+            # 接入非福利账号。price_source 标成 welfare，账本能区分出这些
+            # 0 元行不是「没取到价」。
+            if account.get("welfare"):
+                cost = 0.0
+                price_source = "welfare"
             holder["cost"] = cost
             return cost, price_source
 
@@ -1734,6 +1822,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload["usage"]["cost"] = round(holder["cost"], 8)
                 self._send_json(200, payload)
         finally:
+            store.leave_account(account["id"])
             cost, price_source = billing()
             store.record_usage(
                 key_id=key["id"],
@@ -1808,7 +1897,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_credential", "请填写凭证")
 
         try:
-            info = prov.connect(credential, region)
+            info = prov.connect(credential, region, base_url)
         except providers.Unsupported:
             raise
         except qoder.UpstreamError as e:
@@ -1823,6 +1912,8 @@ class Handler(BaseHTTPRequestHandler):
             provider=prov.slug, uid=info["uid"], region=region,
             credential=credential, email=info.get("email", ""),
             name=info.get("name", ""),
+            base_url=info.get("base_url") or base_url,
+            welfare=1 if prov.slug == "welfare" else 0,
         )
         expires_at = time.time() + int(info.get("expires_in") or 86400)
         get_store().set_account_tokens(
@@ -1905,8 +1996,9 @@ class Handler(BaseHTTPRequestHandler):
         region = (payload.get("region") or "").strip() or next(iter(prov.regions))
         if region not in prov.regions:
             return {"ok": False, "error": f"{prov.label} 没有这个区域：{region}"}
+        base_url = (payload.get("base_url") or "").strip()
         try:
-            info = prov.connect(credential, region)
+            info = prov.connect(credential, region, base_url)
         except providers.Unsupported as e:
             return {"ok": False, "error": str(e)}
         except qoder.UpstreamError as e:
@@ -1918,6 +2010,8 @@ class Handler(BaseHTTPRequestHandler):
             provider=prov.slug, uid=info["uid"], region=region,
             credential=credential, email=info.get("email", ""),
             name=info.get("name", ""),
+            base_url=info.get("base_url") or base_url,
+            welfare=1 if prov.slug == "welfare" else 0,
         )
         expires_at = time.time() + int(info.get("expires_in") or 86400)
         get_store().set_account_tokens(
@@ -1929,6 +2023,120 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True, "account_id": account_id, "uid": info["uid"],
                 "name": info.get("name") or info["uid"][:8], "region": region,
                 "quota": quota}
+
+
+    # ---------------- 福利账号 ----------------
+
+    def _welfare_probe(self):
+        """探测一个福利账号能跑哪些模型，先不落库。
+
+        body: {"api_key": "...", "base_url": "..."}
+
+        分两步：先拉 /models 拿到候选清单，再逐个发一个最小请求确认真能出
+        结果——/models 里列着但没开通、欠费的模型不在少数，只信清单会让
+        成员选到永远失败的模型。探测结果回给管理员，由他现场勾选要分发的
+        那些，勾完才写库。
+        """
+        body = self._read_json()
+        key = welfare.normalize_key(body.get("api_key") or "")
+        base = welfare.normalize_base_url(body.get("base_url") or "")
+        if not key:
+            return self._error(400, "bad_credential", "请填写 API Key")
+        if not base:
+            return self._error(400, "bad_base_url", "请填写 Base URL")
+        account = {"api_key": key, "base_url": base}
+        try:
+            listed = welfare.list_models(account)
+        except welfare.UpstreamError as e:
+            return self._error(400, "upstream_unreachable", str(e.detail or e)[:300])
+        if not listed:
+            return self._error(400, "no_models", "这个地址没有返回任何模型")
+        # 逐个探测。模型多时这一步会有几十次请求，但每个只要 1 个 token，
+        # 换来的是「勾选的模型一定能用」，比事后排查便宜。
+        models = []
+        for m in listed:
+            ok, why = welfare.probe_model(account, m["id"])
+            models.append({"id": m["id"], "name": m.get("name") or m["id"],
+                           "available": ok, "reason": why})
+        usable = [m for m in models if m["available"]]
+        return self._send_json(200, {
+            "base_url": base, "models": models,
+            "usable": len(usable), "total": len(models),
+        })
+
+    def _welfare_import(self):
+        """落库一个福利账号，并把选中的模型分发给所有成员。
+
+        body: {"api_key", "base_url", "models": ["模型id", ...], "name"?}
+
+        分发的含义有两层，按「这个模型原本有没有账号能跑」区分：
+        - 原本跑不了：加到每个成员的可用模型里，plan 页也列出来并标临时。
+        - 原本就跑得了：只把这个账号加为该模型的又一条来源，并把额度记成
+          无限。既然本来就能用，多一条福利来源不该在预测图上凭空多一行。
+        两种情况都不扣成员额度（账号带 welfare 标记，计费时按 0 元算）。
+        """
+        body = self._read_json()
+        key = welfare.normalize_key(body.get("api_key") or "")
+        base = welfare.normalize_base_url(body.get("base_url") or "")
+        picked = [str(x).strip() for x in (body.get("models") or []) if str(x).strip()]
+        if not key or not base:
+            return self._error(400, "bad_request", "缺少 api_key 或 base_url")
+        if not picked:
+            return self._error(400, "bad_request", "请至少选择一个模型")
+
+        store = get_store()
+        prov = providers.get("welfare")
+        try:
+            info = prov.connect(key, "default", base)
+        except welfare.UpstreamError as e:
+            return self._error(400, "credential_rejected", str(e.detail or e)[:300])
+        account_id = store.add_account(
+            provider="welfare", uid=info["uid"], region="default",
+            credential=key, email="", name=(body.get("name") or base)[:60],
+            base_url=base, welfare=1,
+        )
+        store.set_account_tokens(account_id, key, "", 0)
+        # 记下这个账号分发了哪些模型：账号被删时按它回收成员白名单
+        store.set_account_models(account_id, picked)
+
+        # 分发前先看这些模型在别的账号上能不能跑，决定要不要进预测图
+        before = all_models()
+        existing = {mid for mid in before
+                    if any(r.get("provider") != "welfare"
+                           for r in (before[mid].get("routes") or []))}
+        clear_model_cache()
+        after = all_models()
+
+        added, merged = [], []
+        for mid in picked:
+            entry = after.get(mid) or {}
+            if not entry:
+                continue
+            routes = entry.get("routes") or []
+            has_other = any(r.get("provider") != "welfare" for r in routes)
+            if has_other:
+                merged.append(mid)   # 本来就能跑，只多一条来源
+            else:
+                added.append(mid)    # 全新模型，要进成员白名单
+
+        # 新模型加进所有成员的可用模型。已有白名单是「明确列出」语义，
+        # 所以往每个人那份里追加；空白的白名单表示不限制，本来就能用。
+        if added:
+            specs = [f"welfare:{mid}" for mid in added]
+            for m in store.list_members():
+                cur = (m.get("model_allowlist") or "").strip()
+                if not cur:
+                    continue   # 不限制的成员天然可用，不用改
+                have = {x.strip() for x in cur.split(",") if x.strip()}
+                grow = [sp for sp in specs if sp not in have]
+                if grow:
+                    store.update_member(
+                        m["id"], model_allowlist=",".join([cur, *grow]))
+        return self._send_json(200, {
+            "ok": True, "account_id": account_id,
+            "added_models": added, "merged_models": merged,
+            "distributed": len(added), "merged": len(merged),
+        })
 
     def _account_action(self):
         body = self._read_json()
@@ -2247,6 +2455,52 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- 视图 ----------------
 
     @staticmethod
+    def _account_ladder(store, routes: list[dict], prefer: int | None,
+                        model: str, meta: dict):
+        """按优先级列出该试的 (厂商, 区域, 上游模型key)，前面的先试。
+
+        每一步都是「某个厂商的某个区域」，由厂商自己声明的 rank 决定先后：
+        workbuddy 国内 → 其他渠道 → workbuddy 国际 → 福利 → qoder 国内 →
+        qoder 国际。routes 决定哪些厂商允许用（白名单），这里只决定次序。
+
+        成员的优先账号单独排在最前，条件是它属于这个模型允许的来源之一：
+        绑了个跑不了这个模型的账号时，先按它选没有意义。
+
+        每家厂商要覆盖它所有区域而不是只试路由上那个：账号是按区域分开存的，
+        路由上的 region 只是默认值。
+        """
+        out: list[tuple] = []
+        seen: set[tuple] = set()
+
+        def add(cand, region: str, route_model: str):
+            key = (cand.slug, region, route_model)
+            if key in seen:
+                return
+            seen.add(key)
+            out.append((cand, region, route_model))
+
+        allowed = {r["provider"]: r for r in routes}
+        # 优先账号：它属于哪家，就把那家排到最前，并且只挑它自己那个区域
+        if prefer:
+            acc = store.get_account(prefer)
+            if acc and acc.get("provider") in allowed:
+                cand = providers.get(acc["provider"])
+                add(cand, acc.get("region") or "", allowed[acc["provider"]]["model"])
+
+        # 其余按档位从高到低铺开。同档内保持 routes 的顺序（目录顺序）。
+        ordered = sorted(
+            (r for r in routes),
+            key=lambda r: providers.get(r["provider"]).rank(r["region"]))
+        for r in ordered:
+            cand = providers.get(r["provider"])
+            # 该厂商每个区域都要试，顺序也按档位：Qoder 国内要排在
+            # Qoder 国际前面，不能因为路由默认登记的是国际版就先试国际版。
+            regions = sorted(cand.regions, key=lambda x: cand.rank(x))
+            for region in regions:
+                add(cand, region, r["model"])
+        return out
+
+    @staticmethod
     def _no_account_reason(provider, region: str) -> str:
         """没有可用账号时，说清到底是没配、全停了、还是都在冷却。
 
@@ -2290,6 +2544,13 @@ class Handler(BaseHTTPRequestHandler):
                 "provider_color": prov.color,
                 "provider_available": prov.available,
                 "supports_checkin": prov.supports_checkin,
+                # 账号池档位与当前在途请求数。账号页按档位排序（数字小的
+                # 先挑流量），并显示每个账号正扛着几个并发。
+                "pool_rank": _rank_num(prov, a["region"]),
+                "inflight": store.account_inflight(a["id"]),
+                # 福利账号：额度是 ∞，账号页不显示积分进度条
+                "welfare": bool(a.get("welfare")),
+                "base_url": a.get("base_url") or "",
                 "region_label": prov.region_label(a["region"]),
                 "email": a["email"], "name": a["name"],
                 "enabled": bool(a["enabled"]),
@@ -3328,6 +3589,12 @@ class Handler(BaseHTTPRequestHandler):
                 # 落到真实账号的才有账号数；未分配的失败请求不算一个账号
                 "accounts": sum(1 for a in by_account if not a.get("unbound")),
             },
+            # 详情页内的编辑器要用：档位下拉与模型目录（含每家来源）。
+            # 以前这两样由 admin.html 的弹窗自己拉 /api/status，编辑搬到
+            # 详情页后一并给到这里，省一次请求。
+            "plans": plans.PLANS,
+            "catalog": Handler.models_view(catalog, price_overrides(store)),
+            "providers": providers.describe_all(),
             "by_account": [a for a in by_account if not a.get("unbound")],
             # 没落到账号就失败的请求：单独一行，不占账号位的占比
             "unbound": [a for a in by_account if a.get("unbound")],

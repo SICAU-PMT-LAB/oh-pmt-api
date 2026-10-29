@@ -118,6 +118,16 @@ class UpstreamError(qoder.UpstreamError):
         """模型侧资源紧张，换账号或稍后重试即可，不是凭证问题。"""
         return "11134" in self.body or "11133" in self.body
 
+    @property
+    def is_model_missing(self) -> bool:
+        """这个账号没有这个模型（11102）。
+
+        账号本身是好的，缺的只是某一个模型——不同渠道的模型集合不一样
+        （国际版比国内版窄）。这种错误应当只冻结这一个模型，不能让整个
+        账号冷却一分钟——那会把其他成员对别的模型的请求一起撞走。
+        """
+        return "11102" in self.body
+
     def retry_after(self) -> int:
         return 30
 

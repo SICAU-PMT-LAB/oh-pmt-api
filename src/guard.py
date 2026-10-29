@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import time
 
-from store import day_end, day_start
+from store import day_end, day_start, week_end, week_start
 import plans
 
 
@@ -208,7 +208,7 @@ def _forbidden(model: str, allowed: set[str],
 
 
 def tier_limits(member: dict) -> tuple[float, float]:
-    """成员的 (日限额, 总限额)，单位元。
+    """成员的 (日限额, 周限额)，单位元。
 
     日与周是两个独立窗口，各自回退：member.limit_daily / limit_total
     非 0 时是管理员的手动覆盖，直接生效；哪一个是 0 就单独回退到档位，
@@ -241,7 +241,7 @@ def quota_status(store, member: dict, models: dict | None = None,
     a 花 ¥50 占 50%，再花 d ¥4 占 40%，池子就用掉 90%，只剩 10%——这 10%
     既可以继续花 ¥10 在 a 上，也可以花 ¥1 在 d 上。
 
-    所以总额度 ¥100 是**对外口径**，真正限制能花多少的是上面这个和。
+    所以周额度 ¥100 是**对外口径**，真正限制能花多少的是上面这个和。
     默认每个模型的额度就是档位那一份，此时和恰好等于「总花费 / 档位额度」，
     与不分模型时的行为完全一致；把某个模型调小，它自己占的份额就变大，
     池子按比例提前用尽。
@@ -255,7 +255,7 @@ def quota_status(store, member: dict, models: dict | None = None,
     # 档位额度只被 plan 通道消耗：api 通道走的是另一本账（赠礼余额），
     # 同一笔花费既扣余额又占档位额度等于停两次。
     used_today = store.cost_since(mid, day_start(), channel="plan")
-    used_total = store.cost_total(mid, channel="plan")
+    used_total = store.cost_since(mid, week_start(), channel="plan")
 
     # models 可能是 all_models() 的目录（值是元数据），也可能已经是
     # {id: 显示名}；这里统一成后者，model_quota 只认名字。
@@ -281,8 +281,9 @@ def quota_status(store, member: dict, models: dict | None = None,
         "left_total": left(pct_total, total_limit),
         "pct_today": pct_today,
         "pct_total": pct_total,
-        # 日限额到点重置，总限额不重置
+        # 日窗口到 0 点重置，周窗口到周一 0 点重置
         "reset_at": day_end() if daily_limit else None,
+        "reset_total_at": week_end() if total_limit else None,
     }
 
 
@@ -302,7 +303,7 @@ def model_quota(store, member: dict, models: dict[str, str],
     每个模型自己到 100% 时只停那一个模型。
 
     例：a 额度 ¥100、d 额度 ¥10。a 花 ¥50 → 占 50%，再花 d ¥4 → 占 40%，
-    合计 90%，只剩 10%：还能花 ¥10 在 a 上，或 ¥1 在 d 上。总额度 ¥100
+    合计 90%，只剩 10%：还能花 ¥10 在 a 上，或 ¥1 在 d 上。周额度 ¥100
     是对外口径，真正卡住能花多少的就是这个和。
 
     默认每个模型的额度都是档位那一份，此时和恰好等于「总花费 / 档位额度」，
@@ -335,7 +336,8 @@ def model_quota(store, member: dict, models: dict[str, str],
     # 只看 plan 通道：api 通道走另一本账，占同一份额度会重复计算
     today = store.member_model_summary(mid, since=day_start(),
                                        until=day_end(), channel="plan")
-    all_time = store.member_model_summary(mid, since=0, channel="plan")
+    all_time = store.member_model_summary(mid, since=week_start(),
+                                          channel="plan")
 
     rows: dict[str, dict] = {}
     # 先按目录铺一遍：没调用过的模型也要在界面上有一行额度
@@ -368,7 +370,8 @@ def model_quota(store, member: dict, models: dict[str, str],
     for cell in rows.values():
         # 限额字段叫 limit_daily / limit_total，已用叫 used_today / used_total，
         # 百分比叫 pct_daily / pct_total：日窗口对的是「今天」（从 0 点算），
-        # 总额度不重置。三组名字各自与库里的列、与界面上的词对齐。
+        # 日窗口看今天，周窗口看本周（周一 0 点起）。三组名字各自与库里的
+        # 列、与界面上的词对齐。
         for limit_key, used_key, pct_key, blocked_key in (
                 ("limit_daily", "used_today", "pct_daily", "blocked_daily"),
                 ("limit_total", "used_total", "pct_total", "blocked_total")):
@@ -439,7 +442,8 @@ def check_quota(store, member: dict | None, key: dict | None = None,
     if st["pct_total"] is not None and st["pct_total"] >= 100.0:
         raise Denied(
             429, "quota_total_exceeded",
-            f"额度已用完（{st['pct_total']:.1f}%），请联系管理员调整档位",
+            f"本周额度已用完（{st['pct_total']:.1f}%），"
+            f"{time.strftime('%m-%d %H:%M', time.localtime(week_end()))} 重置",
         )
 
 
@@ -450,7 +454,7 @@ def check_model_quota(store, member: dict | None, key: dict | None,
     """这一个模型自己的额度用完了就拒，别的模型不受影响。
 
     模型额度默认就是整份档位额度，所以默认情况下它到 100% 的时刻与
-    check_quota 的总额度到顶是同一时刻，多这一道不会改变现有行为；
+    check_quota 的周额度到顶是同一时刻，多这一道不会改变现有行为；
     管理员把某个模型改小时，它自己的 100% 才会提前先到。
 
     ``model`` 传对外显示名；``names`` 用来把历史行里的上游 key 折成
@@ -473,7 +477,8 @@ def check_model_quota(store, member: dict | None, key: dict | None,
     if limit_daily <= 0 and limit_total <= 0:
         return
 
-    rows = store.member_model_summary(member["id"], channel="plan")
+    rows = store.member_model_summary(member["id"], since=week_start(),
+                                      channel="plan")
     today = store.member_model_summary(member["id"], since=day_start(),
                                        until=day_end(), channel="plan")
 
@@ -496,6 +501,7 @@ def check_model_quota(store, member: dict | None, key: dict | None,
     if limit_total > 0 and used_total >= limit_total:
         raise Denied(
             429, "model_quota_exceeded",
-            f"模型 {model} 的额度已用完"
-            f"（{used_total * 100.0 / limit_total:.1f}%），请联系管理员调整",
+            f"模型 {model} 的本周额度已用完"
+            f"（{used_total * 100.0 / limit_total:.1f}%），"
+            f"{time.strftime('%m-%d %H:%M', time.localtime(week_end()))} 重置",
         )
