@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 
 import qoder
+import welfare
 import workbuddy
 
 
@@ -38,6 +39,9 @@ class Provider:
     available = False
     # 该厂商支持的区域；第一个是默认值
     regions: dict[str, dict] = {}
+    # 凭证是否由「api-key + base-url」两段组成。只有这类厂商需要额外传地址，
+    # 其余厂商的 connect 保持两参数，不为了统一签名给它们加没用的形参。
+    needs_base_url = False
     # 是否支持每日签到领额度
     supports_checkin = False
     # 是否需要把客户端原样的 thinking / reasoning 对象转给上游。
@@ -52,13 +56,30 @@ class Provider:
     # token = 按 token 计费。成员页按账号统计消耗时以它决定记哪一种，
     # 积分账号的 token 数只是过程量，不能和 token 账号的 token 相加。
     billing_unit = "token"
+    # 账号池的分流优先级：数字小的先挑。这个顺序决定「成员的优先账号用不了
+    # 时先去哪一类账号」，是运维策略而不是协议事实，所以集中在这里声明，
+    # 调整档位只改这张表。
+    #
+    # 它和 PROVIDERS 的字典顺序是两件事：那个顺序是路由顺序（客户端没设
+    # 优先账号、几家都能跑同一个模型时先试谁），这个是账号池里的先后。
+    #
+    # 默认 2 是「其他渠道」那一档：workbuddy 国内(1) 之下、workbuddy 国际(3)
+    # 之上。新接一家厂商不写 priority 就落在这里，正好是用户要的位置。
+    priority = 2
+    # 厂商内部的区域档位：数字小的先挑。没列到的区域取 priority+1，
+    # 新增区域不会意外抢到主力位置。
+    region_priority: dict[str, int] = {}
 
     # ---- 协议能力 ----
 
-    def connect(self, credential: str, region: str) -> dict:
+    def connect(self, credential: str, region: str, base_url: str = "") -> dict:
         """校验长期凭证并返回账号身份 {uid, email, name}。
 
         同时把换来的短期凭据写回账号，由调用方落库。
+
+        base_url 只有 needs_base_url 的厂商用得到（福利账号是 api-key +
+        地址两段凭证）；其余厂商的实现保持两参数，不为了统一签名加没用
+        的形参。
         """
         raise Unsupported(f"{self.label} 还没有接入协议")
 
@@ -98,6 +119,20 @@ class Provider:
     def region_label(self, region: str) -> str:
         return (self.regions.get(region) or {}).get("label") or region
 
+    def rank(self, region: str = "") -> tuple[int, int]:
+        """账号池的挑选优先次序，数字小的先挑。
+
+        两个数：厂商档位、区域档位。成员没绑优先账号、或绑定的账号都不可用
+        时，账号池按这个次序一档一档找下去，而不是拿所有厂商的账号混在一起
+        按最近使用时间轮询。混在一起轮询的问题是：一个能正常跑的主力账号，
+        只要最近被用过，就会被排到额度紧张的备用账号后面。
+
+        顺序（数字小的优先）：
+            workbuddy 国内 → 其他厂商 → workbuddy 国际 → 福利 → qoder 国内 → qoder 国际
+        """
+        return (self.priority,
+                self.region_priority.get(region, self.priority + 1))
+
     def describe(self) -> dict:
         return {
             "slug": self.slug,
@@ -105,6 +140,8 @@ class Provider:
             "short": self.short or self.label,
             "color": self.color,
             "available": self.available,
+            # 账号池档位：数字小的先被分配流量，界面按它排厂商卡片
+            "pool_rank": self.priority,
             "credential_prefix": self.credential_prefix,
             "credential_hint": self.credential_hint,
             "credential_url": self.credential_url,
@@ -127,6 +164,9 @@ class QoderProvider(Provider):
     supports_checkin = True
     billing_unit = "credit"
     regions = {rid: {"label": info["label"]} for rid, info in qoder.REGIONS.items()}
+    # Qoder 额度最紧张、失败率最高，兜底用，能不碰就不碰
+    priority = 6
+    region_priority = {"cn": 5, "global": 7}
 
     def connect(self, credential: str, region: str) -> dict:
         ex = qoder.exchange_pat(credential, region)
@@ -189,6 +229,8 @@ class WorkbuddyProvider(Provider):
     catalog_needs_account = False
     regions = {rid: {"label": info["label"]}
                for rid, info in workbuddy.REGIONS.items()}
+    # 国内版是主力：同一家厂商里先挑国内版账号，国际版只在它顶不住时补位
+    region_priority = {"cn": 1, "global": 3}
 
     def connect(self, credential: str, region: str) -> dict:
         info = workbuddy.parse_credential(credential)
@@ -249,6 +291,93 @@ class WorkbuddyProvider(Provider):
         return workbuddy.checkin(account)
 
 
+class WelfareProvider(Provider):
+    """福利账号：任意 OpenAI 兼容上游，凭 api-key + base-url 接入。
+
+    与另外两家的两点不同：
+    - 凭证是「api-key + base-url」两段，不是一个打包好的字符串。base-url
+      存在 accounts.base_url，api-key 存在 credential。
+    - 额度是 ∞。请求照常计量，但计费按 0 元，不占成员档位百分比。
+      判断依据是账号的 welfare 标记而非厂商名。
+    """
+
+    slug = "welfare"
+    label = "福利账号"
+    short = "福利"
+    color = "#8f5a2f"
+    credential_prefix = ""
+    credential_hint = "API Key（支持 base64），配合 Base URL 使用"
+    credential_url = ""
+    available = True
+    supports_checkin = False
+    billing_unit = "token"
+    needs_base_url = True
+    # 模型清单要问上游，没有账号读不到
+    catalog_needs_account = True
+    regions = {"default": {"label": "默认"}}
+    # 额度免费但来源临时、随时可能失效，排在正常付费账号之后
+    priority = 4
+
+    def connect(self, credential: str, region: str, base_url: str = "") -> dict:
+        """校验凭证：拉一次模型列表，能拉通才算接得上。"""
+        key = welfare.normalize_key(credential)
+        base = welfare.normalize_base_url(base_url)
+        if not key:
+            raise welfare.UpstreamError(0, "", "请填写 API Key")
+        if not base:
+            raise welfare.UpstreamError(0, "", "请填写 Base URL")
+        account = {"api_key": key, "base_url": base}
+        models = welfare.list_models(account)
+        if not models:
+            raise welfare.UpstreamError(0, "", "这个地址没有返回任何可用模型")
+        # uid 取 base-url 的摘要：同一上游重复导入应当覆盖而不是新增一条
+        import hashlib
+        uid = hashlib.sha256(base.encode()).hexdigest()[:16]
+        return {
+            "uid": uid, "email": "", "name": base,
+            "region": "default",
+            "access_token": key, "refresh_token": "", "expires_in": 0,
+            "base_url": base,
+        }
+
+    def refresh(self, account: dict) -> dict | None:
+        # API Key 不过期，没有续期这回事
+        return None
+
+    def list_models(self, account: dict) -> list[dict]:
+        """只返回管理员当初勾选的模型。
+
+        上游 /models 里会列出这个 key 用不了的条目（没开通、欠费），
+        全部灌进目录会让成员看到一堆选了就失败的模型。导入时探测过一遍、
+        管理员也现场挑过了，那份名单才是对外承诺。
+        """
+        picked = [x.strip() for x in
+                  (account.get("welfare_models") or "").split(",") if x.strip()]
+        if not picked:
+            return []
+        return [{"id": mid, "name": mid} for mid in picked]
+
+    def list_models_all(self, account: dict) -> list[dict]:
+        """上游报的全部模型，只在导入探测时用。"""
+        return welfare.list_models(account)
+
+    def probe_model(self, account: dict, model: str) -> tuple[bool, str]:
+        return welfare.probe_model(account, model)
+
+    def chat_stream(self, account: dict, body: bytes, model: str):
+        return welfare.chat_stream(account, body, model)
+
+    def build_chat_body(self, messages, model, *, stream=True, tools=None,
+                        parameters=None, meta=None):
+        return welfare.build_chat_body(messages, model, stream=stream,
+                                       tools=tools, parameters=parameters,
+                                       meta=meta)
+
+    def normalize_effort(self, effort, meta=None):
+        # 直通上游，档位原样交给它
+        return effort or None
+
+
 class PendingProvider(Provider):
     """协议还没接入的厂商。占位，让界面能按厂商分区并给出接入指引。"""
 
@@ -284,6 +413,7 @@ PROVIDERS: dict[str, Provider] = {
     p.slug: p for p in (
         QoderProvider(),
         WorkbuddyProvider(),
+        WelfareProvider(),
         ClineProvider(),
         CommandcodeProvider(),
     )

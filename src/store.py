@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 
@@ -21,6 +22,13 @@ CREATE TABLE IF NOT EXISTS accounts (
     name            TEXT DEFAULT '',
     -- 长期凭证：Qoder 是 pt- 开头的 PAT，其他厂商是各自的 API Key
     credential      TEXT NOT NULL,
+    -- 福利账号的上游地址（OpenAI 兼容，含 /v1）。其余厂商为空。
+    base_url        TEXT DEFAULT '',
+    -- 福利账号：请求照常计量，但计费按 0 元且不占成员档位百分比
+    welfare         INTEGER DEFAULT 0,
+    -- 这个账号分发了哪些对外模型（逗号分隔的模型 id）。账号删掉时按它
+    -- 把成员白名单里的 welfare:<id> 一起收回，避免留下选不中的条目。
+    welfare_models  TEXT DEFAULT '',
     access_token    TEXT DEFAULT '',
     refresh_token   TEXT DEFAULT '',
     expires_at      REAL DEFAULT 0,
@@ -28,6 +36,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_error      TEXT DEFAULT '',
     last_used_at    REAL DEFAULT 0,
     cooldown_until  REAL DEFAULT 0,
+    -- 按模型的冷却：{"<上游模型 key>": <解除时间戳>}。上游对某个模型报
+    -- 「这个账号没有这个模型」时只冻结这一个模型，不该把整个账号停掉一分钟——
+    -- 账号级的 60 秒冷却会连带把其他成员的其他模型一起挤到别的账号上。
+    model_cooldowns TEXT DEFAULT '',
     -- 积分快照，由上游 quota 接口刷新（total/used/remaining 是全部额度合计）
     credits_total   REAL DEFAULT 0,
     credits_used    REAL DEFAULT 0,
@@ -68,7 +80,8 @@ CREATE TABLE IF NOT EXISTS members (
     -- 档位：go / plus / pro / max，额度由 src/plans.py 的 PLANS 推导。
     -- limit_daily / limit_total 是手动覆盖值，非 0 时优先于档位。
     tier            TEXT DEFAULT 'plus',
-    -- 限额（元），0 表示跟随档位。日限额按本地 0 点重置，总限额不重置。
+    -- 限额（元），0 表示跟随档位。日限额按本地 0 点重置，周限额周一 0 点重置。
+    -- 列名历史上叫 limit_total，语义就是上面那个周窗口。
     limit_daily     REAL DEFAULT 0,
     limit_total     REAL DEFAULT 0,
     -- 优先使用的账号（软绑定，超额可回退到其他账号）
@@ -191,9 +204,68 @@ def day_end(ts: float | None = None) -> float:
     return day_start((ts if ts is not None else time.time()) + 86400)
 
 
+def week_start(ts: float | None = None) -> float:
+    """本周周一 00:00 的时间戳（本地时区）。周限额按这个点重置。
+
+    自然周而不是滚动 7 天：与日限额「每天 0 点清零」同一种口径，界面上
+    能写清哪一刻恢复。tm_wday 是 0（周一）到 6（周日），日期减掉它再
+    mktime，跨月跨年由 mktime 自己归一化。
+    """
+    t = time.localtime(ts if ts is not None else time.time())
+    return time.mktime((t.tm_year, t.tm_mon, t.tm_mday - t.tm_wday,
+                        0, 0, 0, 0, 0, -1))
+
+
+def week_end(ts: float | None = None) -> float:
+    """下周一 00:00 的时间戳，界面用来告诉成员什么时候重置。"""
+    return week_start((ts if ts is not None else time.time()) + 7 * 86400)
+
+
+def model_cooldowns(raw: str | None) -> dict[str, float]:
+    """解析账号的按模型冷却表：{"上游模型 key": 解除时间戳}。
+
+    空串或坏数据一律当「没有模型冷却」。这里不做修复，因为写坏的那一行
+    相当于把该账号对所有模型恢复可用，与宁可少冻结原则一致。
+    """
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, value in data.items():
+        if isinstance(value, (int, float)):
+            out[str(key)] = float(value)
+    return out
+
+
+def _model_blocked(account, model: str, now: float) -> bool:
+    """这个账号是否正因「没有这个模型」而处于冷却。
+
+    model 为空时（目录探测这类不关心的调用）不做模型级过滤。过期的条目
+    当已解除，不必写回库里——查询量远大于写入量。
+
+    account 可能是 sqlite3.Row 也可能是 dict，两种都支持。
+    """
+    if not model:
+        return False
+    try:
+        raw = account["model_cooldowns"]
+    except (KeyError, IndexError):
+        return False
+    return model_cooldowns(raw).get(model, 0) > now
+
+
 class Store:
     def __init__(self, path: str):
         self.path = path
+        # 每个账号当前有多少请求正在上游跑。放在内存里而不是库里：
+        # 进程重启后应该归零，落到库里反而会留下永远不清的陈旧计数。
+        self._inflight: dict[int, int] = {}
+        self._inflight_lock = threading.Lock()
         self._init()
         # 库里存着全部上游账号的令牌，同机其他用户不该能读。umask 默认是 022，
         # 建出来的库文件是 644，同组和所有用户都能打开。这里收到仅属主可读写；
@@ -337,6 +409,10 @@ class Store:
             ("checkin_ok", "INTEGER DEFAULT 0"),
             ("checkin_earned", "REAL DEFAULT 0"),
             ("checkin_message", "TEXT DEFAULT ''"),
+            ("base_url", "TEXT DEFAULT ''"),
+            ("welfare", "INTEGER DEFAULT 0"),
+            ("model_cooldowns", "TEXT DEFAULT ''"),
+            ("welfare_models", "TEXT DEFAULT ''"),
         ):
             if name not in acc_cols:
                 c.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
@@ -360,9 +436,9 @@ class Store:
             if name not in mem_cols:
                 c.execute(f"ALTER TABLE members ADD COLUMN {name} {decl}")
 
-        # 限额口径从「积分 + 周限额」换成「成本 + 总限额」。单位变了（积分→元），
-        # 旧数值只能当近似保留：周限额搬成总限额，日限额原样留着，两者都不清零，
-        # 否则升级后等于放开限制。管理员需要按新单位重新核对一遍。
+        # 限额口径从「积分 + 周限额」换成「成本 + 周限额」。单位变了（积分→元），
+        # 旧数值只能当近似保留：老的 limit_weekly 搬进 limit_total，日限额原样留着，
+        # 两者都不清零，否则升级后等于放开限制。管理员需要按新单位重新核对一遍。
         if "limit_total" not in mem_cols:
             c.execute("ALTER TABLE members ADD COLUMN limit_total REAL DEFAULT 0")
             if "limit_weekly" in mem_cols:
@@ -415,16 +491,19 @@ class Store:
     # ---------------- 账号 ----------------
 
     def add_account(self, *, uid, region, credential, provider="qoder",
-                    email="", name="") -> int:
+                    email="", name="", base_url="", welfare=0) -> int:
         with self._conn() as c:
             cur = c.execute(
                 """INSERT INTO accounts (provider, uid, region, credential, email,
-                     name, created_at)
-                   VALUES (?,?,?,?,?,?,?)
+                     name, base_url, welfare, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(provider, uid, region) DO UPDATE SET
                      credential=excluded.credential, email=excluded.email,
-                     name=excluded.name, last_error='', cooldown_until=0""",
-                (provider, uid, region, credential, email, name, time.time()),
+                     name=excluded.name, base_url=excluded.base_url,
+                     welfare=excluded.welfare,
+                     last_error='', cooldown_until=0, model_cooldowns=''""",
+                (provider, uid, region, credential, email, name, base_url,
+                 int(bool(welfare)), time.time()),
             )
             if cur.lastrowid:
                 return cur.lastrowid
@@ -455,12 +534,24 @@ class Store:
             r = c.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
             return dict(r) if r else None
 
+    def _over_capacity(self, account_id: int, capacity: int) -> bool:
+        """这个账号的在途请求是否已达上限。capacity<=0 表示不限。"""
+        if capacity <= 0:
+            return False
+        return self.account_inflight(account_id) >= capacity
+
     def pick_account(self, region: str, provider: str = "qoder",
                      prefer_id: int | None = None,
-                     exclude: set[int] | None = None) -> dict | None:
+                     exclude: set[int] | None = None,
+                     model: str = "",
+                     capacity: int = 0) -> dict | None:
         """选账号：优先指定的那个，不可用时回退到同厂商同区域最久未用的。
 
         exclude 里的账号会被跳过，用于一个账号排队时换到别的账号重试。
+
+        model 用于按模型的冷却：账号在 model_cooldowns 里记了这个上游 key
+        且还没到期时跳过。上游的「这个账号没有这个模型」是模型级的，
+        不该把整个账号停一分钟——那会把其他成员的其他模型一起撞走。
 
         优先账号按 id 认，**不看区域**：成员绑定的是某个具体账号，而一个对外
         模型在厂商目录里只登记了一条路由（WorkBuddy 的 CATALOG 每个区域都
@@ -471,6 +562,11 @@ class Store:
         选中即占用：这里会在同一个事务里把 last_used_at 推到当前时刻，
         所以并发请求不会同时拿到同一个「最久未用」的账号。选完不占用的
         话，两个请求会读到同一个 id，等于没有轮询。
+
+        capacity 是这个账号的在途请求上限，0 表示不限。超过上限的账号会
+        被排到后面，让并发分摊到别的账号上——一个账号同时压太多请求，上游
+        就按限流处理，成员看到的是排队和失败。分摊的单位是账号而不是厂商：
+        同一个成员的并发请求可以落在同一家的不同账号上。
         """
         skip = tuple(exclude or ())
         with self._conn() as c:
@@ -485,7 +581,8 @@ class Store:
                        AND enabled=1 AND cooldown_until < ?""",
                     (prefer_id, provider, now),
                 ).fetchone()
-                if r:
+                if (r and not _model_blocked(r, model, now)
+                        and not self._over_capacity(r["id"], capacity)):
                     c.execute("UPDATE accounts SET last_used_at=? WHERE id=?",
                               (now, r["id"]))
                     picked = dict(r)
@@ -497,14 +594,54 @@ class Store:
             if skip:
                 sql += " AND id NOT IN (%s)" % ",".join("?" * len(skip))
                 args.extend(skip)
-            sql += " ORDER BY last_used_at ASC, id ASC LIMIT 1"
-            r = c.execute(sql, args).fetchone()
-            if not r:
-                return None
-            c.execute("UPDATE accounts SET last_used_at=? WHERE id=?", (now, r["id"]))
-            picked = dict(r)
-            picked["last_used_at"] = now
-            return picked
+            sql += " ORDER BY last_used_at ASC, id ASC"
+            # 模型冷却要在 Python 里判：SQLite 里拆 JSON 会让这条热路径
+            # 变成一次无法走索引的扫描，而且冷却通常只有一两条。
+            overflow = None
+            for r in c.execute(sql, args):
+                if _model_blocked(r, model, now):
+                    continue
+                if self._over_capacity(r["id"], capacity):
+                    # 记住第一个并发已满的账号作为退路。整池都满了还返回
+                    # None 的话，请求会直接 503——那比「略超一个并发」
+                    # 糟得多，成员看到的是失败而不是稍慢。
+                    if overflow is None:
+                        overflow = r
+                    continue
+                c.execute("UPDATE accounts SET last_used_at=? WHERE id=?",
+                          (now, r["id"]))
+                picked = dict(r)
+                picked["last_used_at"] = now
+                return picked
+            if overflow is not None:
+                c.execute("UPDATE accounts SET last_used_at=? WHERE id=?",
+                          (now, overflow["id"]))
+                picked = dict(overflow)
+                picked["last_used_at"] = now
+                return picked
+            return None
+
+    def account_inflight(self, account_id: int) -> int:
+        with self._inflight_lock:
+            return self._inflight.get(account_id, 0)
+
+    def enter_account(self, account_id: int):
+        """记一次在途请求。选号时占位，请求结束时由调用方 leave。"""
+        with self._inflight_lock:
+            self._inflight[account_id] = self._inflight.get(account_id, 0) + 1
+
+    def leave_account(self, account_id: int):
+        """在途请求结束。必须与 enter_account 成对，否则计数只增不减。"""
+        with self._inflight_lock:
+            left = self._inflight.get(account_id, 0) - 1
+            if left > 0:
+                self._inflight[account_id] = left
+            else:
+                self._inflight.pop(account_id, None)
+
+    def inflight_snapshot(self) -> dict[int, int]:
+        with self._inflight_lock:
+            return dict(self._inflight)
 
     def touch_account(self, account_id: int):
         with self._conn() as c:
@@ -568,9 +705,73 @@ class Store:
             c.execute("UPDATE accounts SET enabled=? WHERE id=?",
                       (1 if enabled else 0, account_id))
 
-    def delete_account(self, account_id: int):
+    def set_model_cooldown(self, account_id: int, model: str, seconds: int,
+                          error: str = ""):
+        """只冻结某个模型，seconds<=0 表示立即解除。
+
+        上游报「这个账号没有这个模型」时用这个，不要用 set_account_cooldown：
+        账号级冷却会把其他成员对**别的模型**的请求一起撞到别的账号上。
+        """
+        if not model:
+            return
         with self._conn() as c:
+            row = c.execute("SELECT model_cooldowns FROM accounts WHERE id=?",
+                            (account_id,)).fetchone()
+            if row is None:
+                return
+            table = model_cooldowns(row["model_cooldowns"])
+            now = time.time()
+            # 顺手清掉已过期的，免得表越写越长
+            table = {k: v for k, v in table.items() if v > now}
+            if seconds > 0:
+                table[model] = now + seconds
+            else:
+                table.pop(model, None)
+            c.execute("UPDATE accounts SET model_cooldowns=? WHERE id=?",
+                      (json.dumps(table, ensure_ascii=False) if table else "",
+                       account_id))
+            if error:
+                c.execute("UPDATE accounts SET last_error=? WHERE id=?",
+                          (error[:500], account_id))
+
+    def set_account_models(self, account_id: int, models: list[str]):
+        """记下福利账号分发了哪些模型，账号删除时按它回收。"""
+        with self._conn() as c:
+            c.execute("UPDATE accounts SET welfare_models=? WHERE id=?",
+                      (",".join(models), account_id))
+
+    def clear_model_cooldowns(self, account_id: int):
+        with self._conn() as c:
+            c.execute("UPDATE accounts SET model_cooldowns='' WHERE id=?",
+                      (account_id,))
+
+    def delete_account(self, account_id: int):
+        """删账号。福利账号要把分发给成员的模型一起收回。
+
+        不收回的话成员白名单里会留一串 welfare:<模型>，而那些模型已经
+        没有任何账号能跑了——成员选了、发出去，请求必然 503，界面又看不出
+        原因。只收它自己分发过的那些，别的账号支持的模型不动。
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT welfare_models FROM accounts WHERE id=?",
+                (account_id,)).fetchone()
+            dropped = [x.strip() for x in ((row["welfare_models"] or "").split(","))
+                       if x.strip()] if row else []
             c.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+            if not dropped:
+                return
+            specs = {f"welfare:{mid}" for mid in dropped}
+            for m in c.execute("SELECT id, model_allowlist FROM members").fetchall():
+                cur = (m["model_allowlist"] or "").strip()
+                if not cur:
+                    continue
+                parts = [x.strip() for x in cur.split(",") if x.strip()]
+                keep = [x for x in parts if x not in specs]
+                if len(keep) != len(parts):
+                    c.execute("UPDATE members SET model_allowlist=? WHERE id=?",
+                              (",".join(keep), m["id"]))
+
 
     # ---------------- 成员 ----------------
 
