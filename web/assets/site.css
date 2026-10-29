@@ -330,6 +330,23 @@ body[data-page="site"] {
   border: 1px solid var(--color-border-weak);
   border-top: none;
   width: 100%;
+  /* 正文衬底：动效背景是固定层，网格会直接从字里穿过去，读起来晃眼。
+     垫一层半透明底色加极轻的模糊，网格留在栏外，栏内保持干净。
+     模糊值不能再大：2px 以上文字边缘会发虚。 */
+  background: color-mix(in srgb, var(--color-site-bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* 暗色下网格是高亮线，压在深底上更刺眼，衬底得再厚一档，
+   否则 72% 挡不住，线还是会从正文里透出来。 */
+:root[data-theme="dark"] [data-component="container"] {
+  background: color-mix(in srgb, var(--color-site-bg) 88%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [data-component="container"] {
+    background: color-mix(in srgb, var(--color-site-bg) 88%, transparent);
+  }
 }
 @media (max-width: 65rem) {
   [data-component="container"] { border: none; }

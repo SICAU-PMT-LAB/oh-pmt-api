@@ -168,6 +168,11 @@ backdrop-filter: blur(14px);
 靠 1px 边框区分层次，让网格在中间穿过去——这是这套设计的辨识度来源。
 例外是装饰性实体，比如演示视频占位块必须是不透明的近黑色，反过来做了会漏星点。
 
+内容栏是例外：`site.css` 给 `[data-component="container"]` 垫了一层
+`color-mix(… 72%, transparent)` 加 `blur(2px)`，否则固定背景会直接从正文里穿过去，
+成员反馈过"看字晃眼"。暗色档网格是亮线、压在深底上更刺眼，衬底要提到 88%，
+72% 挡不住。
+
 ### 调整网格
 
 `backdrop.js` 传参给 `initGridScan`，改一处就能统一调色：
@@ -185,8 +190,9 @@ scanColorLight: '#1c1c1a', scanColorDark: '#fff3d1',
 | 后台（亮） | 0.28 | 0.34 |
 | 后台（暗） | 0.34 | 0.42 |
 
-后台的内容栏还额外垫了一层 `color-mix(… 72%, transparent)` 加 `blur(2px)`，
-让网格从栏外穿过、栏内保持干净。官网不加这层衬底。
+内容栏的衬底写在 `site.css` 的 `[data-component="container"]` 里，官网和后台
+共用一份。`panel.css` 末尾只管背景透明度，不要再写一遍 container 的底色：
+`panel.css` 后加载，同优先级的规则会反过来盖掉 site.css 里的暗色档。
 
 ### 排障
 

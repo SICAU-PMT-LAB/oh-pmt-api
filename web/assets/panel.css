@@ -1457,12 +1457,9 @@ body[data-page="site"] .pmt-backdrop-stars { opacity: 0.28; }
   :root:not([data-theme="light"]) body[data-page="site"] .pmt-backdrop-stars { opacity: 0.34; }
 }
 
-/* 内容栏加一层极薄的衬底：网格从栏外穿过，栏内保持干净可读 */
-body[data-page="site"] [data-component="container"] {
-  background: color-mix(in srgb, var(--color-site-bg) 72%, transparent);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-}
+/* 内容栏的半透明衬底写在 site.css 的 [data-component="container"] 里，
+   两套皮肤共用一份，不要在这里再盖一遍：同优先级下后加载的表单会赢，
+   暗色档就会被这里覆盖掉。 */
 
 /* 成员身份：窄屏隐藏，避免和导航挤在一起 */
 .who-inline {
