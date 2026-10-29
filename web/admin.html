@@ -142,6 +142,7 @@
           <p>按来源厂商分组。点卡片进入该厂商的账号页，再点账号看详情。</p>
         </div>
         <div class="actions">
+          <button class="ghost" onclick="openWelfareModal()">导入福利账号</button>
           <button class="primary" onclick="openAccountModal()">接入账号</button>
           <button onclick="openImportModal()">导入文件</button>
           <button onclick="checkinAll(this)">一键签到</button>
@@ -172,7 +173,7 @@
             <col class="m-c-total"><col class="m-c-models"><col class="m-c-acts">
           </colgroup>
           <thead><tr>
-            <th>成员</th><th>档位</th><th>今日</th><th>总计</th>
+            <th>成员</th><th>档位</th><th>今日</th><th>本周</th>
             <th>可用模型</th><th>操作</th>
           </tr></thead>
           <tbody id="member-body"></tbody>
@@ -424,6 +425,54 @@
   </div>
 </div>
 
+
+<!-- ───────── 福利账号：api-key + base-url，探测模型后现场选择 ───────── -->
+<div class="modal-mask" id="welfare-modal">
+  <div class="modal">
+    <div class="modal-scroll">
+      <h3>导入福利账号</h3>
+      <div class="field">
+        <label for="w-base">Base URL</label>
+        <input id="w-base" placeholder="https://api.example.com/v1">
+        <div class="hint">OpenAI 兼容地址。不带 /v1 会自动补上。</div>
+      </div>
+      <div class="field">
+        <label for="w-key">API Key</label>
+        <input id="w-key" type="password" placeholder="sk-... 或 base64 编码后的内容">
+        <div class="hint">支持直接粘贴 base64，会自动解码。</div>
+      </div>
+      <div class="field" id="w-step1">
+        <button class="primary" id="w-probe" style="align-self:flex-start">
+          探测可用模型</button>
+      </div>
+
+      <div id="w-step2" hidden>
+        <div class="chart-head" style="margin:16px 0 8px">
+          <span class="t">可用模型</span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="small ghost" id="w-all">全选可用</button>
+          <button class="small ghost" id="w-none">清空</button>
+        </div>
+        <div class="hint" id="w-summary"></div>
+        <div class="chip-picker" id="w-models" style="max-height:280px;overflow:auto"></div>
+        <div class="field" style="margin-top:14px">
+          <label for="w-name">账号备注（可选）</label>
+          <input id="w-name" placeholder="例如：某社团赞助">
+        </div>
+        <div class="note">
+          选中的模型会分配给所有成员，额度记作 ∞、不消耗成员自己的额度。
+          如果这个模型本来就有别的账号能跑，只在后台多一条来源，不单独出现在
+          Plan 的预测图里。
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal('welfare-modal')">取消</button>
+      <button class="primary" id="w-import" hidden>导入并分发</button>
+    </div>
+  </div>
+</div>
+
 <!-- ───────── 导入账号文件 ───────── -->
 <div class="modal-mask" id="import-modal">
   <div class="modal">
@@ -660,7 +709,11 @@ async function loadAccounts() {
 function renderProviderCards() {
   const stats = (STATUS && STATUS.provider_stats) || [];
   const grid = document.getElementById('provider-grid');
-  grid.innerHTML = (PROVIDERS.length ? PROVIDERS : stats).map(p => {
+  // 按账号池档位排：数字小的先挑，也就是排在前面的更容易被分配流量。
+  // 顺序由后端 providers.rank 决定，前端只负责照它排，避免两处各写一份。
+  const provs = (PROVIDERS.length ? PROVIDERS : stats).slice().sort((a, b) =>
+    (a.pool_rank || 99) - (b.pool_rank || 99));
+  grid.innerHTML = provs.map(p => {
     const st = stats.find(s => s.slug === p.slug) || {
       accounts: 0, available_accounts: 0, credits_total: 0, credits_remaining: 0, credits_used: 0 };
     const pending = !p.available;
@@ -893,6 +946,99 @@ function regionLabel(id) {
   return id;
 }
 
+
+/* ───────── 福利账号导入 ─────────
+   两步：先探测这个 key 在上游真能跑哪些模型，再由管理员现场勾选要分发的。
+   只信 /models 会导进一批「列着但用不了」的模型，所以探测逐个发最小请求。 */
+let WELFARE = { models: [], picked: new Set() };
+
+window.openWelfareModal = () => {
+  WELFARE = { models: [], picked: new Set() };
+  ['w-base', 'w-key', 'w-name'].forEach(id =>
+    { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('w-step2').hidden = true;
+  document.getElementById('w-import').hidden = true;
+  document.getElementById('w-summary').textContent = '';
+  document.getElementById('w-models').innerHTML = '';
+  openModal('welfare-modal');
+};
+
+function renderWelfareModels() {
+  const box = document.getElementById('w-models');
+  box.innerHTML = WELFARE.models.map(m => {
+    const on = WELFARE.picked.has(m.id);
+    const badge = m.available
+      ? `<span class="chip-prov">可用</span>`
+      : `<span class="chip-prov" title="${esc(m.reason || '')}">不可用</span>`;
+    return `<button type="button" class="chip ${on ? 'on' : ''}"
+        data-wm="${esc(m.id)}" ${m.available ? '' : 'disabled'}
+        style="${m.available ? '' : 'opacity:.45;cursor:not-allowed'}">
+      <span class="tick">✓</span>${esc(m.name)}${badge}</button>`;
+  }).join('') || '<span class="hint">没有探测到模型。</span>';
+  box.querySelectorAll('[data-wm]').forEach(b => {
+    if (b.disabled) return;
+    b.addEventListener('click', () => {
+      const id = b.dataset.wm;
+      if (WELFARE.picked.has(id)) WELFARE.picked.delete(id);
+      else WELFARE.picked.add(id);
+      renderWelfareModels();
+    });
+  });
+  const usable = WELFARE.models.filter(m => m.available).length;
+  document.getElementById('w-summary').textContent =
+    `共 ${WELFARE.models.length} 个模型，${usable} 个探测可用，` +
+    `已选 ${WELFARE.picked.size} 个`;
+}
+
+document.getElementById('w-probe').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const base_url = document.getElementById('w-base').value.trim();
+  const api_key = document.getElementById('w-key').value.trim();
+  if (!base_url || !api_key) { toast('请填写 Base URL 与 API Key', 'err'); return; }
+  btn.disabled = true; btn.textContent = '探测中…';
+  try {
+    const d = await api('/api/welfare/probe', { method: 'POST',
+      body: JSON.stringify({ api_key, base_url }) });
+    WELFARE.models = d.models || [];
+    // 默认只勾可用的，管理员再按需去掉
+    WELFARE.picked = new Set(WELFARE.models.filter(m => m.available).map(m => m.id));
+    renderWelfareModels();
+    document.getElementById('w-step2').hidden = false;
+    document.getElementById('w-import').hidden = false;
+    if (!WELFARE.picked.size) {
+      toast('没有探测到可用模型，这个 key 可能没有额度', 'err');
+    }
+  } catch (err) { toast(err.message, 'err'); }
+  btn.disabled = false; btn.textContent = '探测可用模型';
+});
+
+document.getElementById('w-all').addEventListener('click', () => {
+  WELFARE.picked = new Set(WELFARE.models.filter(m => m.available).map(m => m.id));
+  renderWelfareModels();
+});
+document.getElementById('w-none').addEventListener('click', () => {
+  WELFARE.picked.clear(); renderWelfareModels();
+});
+
+document.getElementById('w-import').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  if (!WELFARE.picked.size) { toast('请至少选择一个模型', 'err'); return; }
+  btn.disabled = true;
+  try {
+    const d = await api('/api/welfare/import', { method: 'POST',
+      body: JSON.stringify({
+        api_key: document.getElementById('w-key').value.trim(),
+        base_url: document.getElementById('w-base').value.trim(),
+        models: [...WELFARE.picked],
+        name: document.getElementById('w-name').value.trim(),
+      }) });
+    closeModal('welfare-modal');
+    toast(`已导入，新模型 ${d.distributed} 个，合并 ${d.merged} 个`);
+    await loadAccounts(); loadOverview();
+  } catch (err) { toast(err.message, 'err'); }
+  btn.disabled = false;
+});
+
 window.openAccountModal = () => {
   const first = PROVIDERS.find(p => p.available) || PROVIDERS[0];
   if (first) selectProvider(first.slug);
@@ -950,7 +1096,7 @@ async function loadMembers() {
             <span class="cap">${fmtMoney(m.used_today)} / ${m.limit_daily > 0 ? fmtMoney(m.limit_daily) : '不限'}</span>
           </div>
           ${m.limit_daily > 0 ? `<div class="${cls(dPct)}"><div data-w="${dPct.toFixed(1)}"></div></div>` : ''}</td>
-        <td data-label="总计" class="mono quota-cell">
+        <td data-label="本周" class="mono quota-cell">
           <div class="q-line">
             <span class="q-pct">${m.limit_total > 0 ? tPct.toFixed(0) + '%' : '不限'}</span>
             <span class="cap">${fmtMoney(m.used_total)} / ${m.limit_total > 0 ? fmtMoney(m.limit_total) : '不限'}</span>
@@ -962,7 +1108,6 @@ async function loadMembers() {
         <td data-label="操作" class="m-acts">
           <div class="row-acts">
             <button class="small" data-act="detail">详情</button>
-            <button class="small ghost" data-act="edit">编辑</button>
           </div>
         </td>
       </tr>`;
@@ -974,14 +1119,9 @@ async function loadMembers() {
     body.querySelectorAll('tr[data-mid]').forEach(tr => {
       const id = Number(tr.dataset.mid);
       tr.addEventListener('click', e => {
-        const act = e.target.closest('[data-act]');
-        // 点行本身（不是按钮）就是看详情，比在操作列里再找一个按钮快
-        if (!act || act.dataset.act === 'detail') {
-          location.href = '/members/' + id;
-          return;
-        }
-        e.stopPropagation();
-        if (act.dataset.act === 'edit') editMember(id);
+        // 点行就进详情。编辑能力已搬进详情页（/members/<id>），
+        // 列表上只留一个跳转，不再单设编辑按钮。
+        location.href = '/members/' + id;
       });
     });
   } catch (e) {

@@ -378,11 +378,15 @@ function renderTable() {
     const pct = free ? 100 : (n / maxReq) * 100;
     const weekReq = m.weekly && m.weekly[tier];
     const est = m.estimated ? '<small>估价</small>' : '';
+    // 福利账号提供的模型：额度无限，但来源是临时的（可能随时下掉），
+    // 所以既要显示 ∞，也要标出「临时」。已经由正常账号支持的模型不带
+    // 这个标记（后端 welfare=false），避免预测图凭空多一行。
+    const welfareTag = m.welfare ? '<small>临时</small>' : '';
     const freeTag = free ? '<small>免费</small>' : '';
     return `
       <tr>
         <th scope="row"><bdi>${esc(m.name)}</bdi>
-          <span data-slot="labels">${est}${freeTag}</span></th>
+          <span data-slot="labels">${est}${freeTag}${welfareTag}</span></th>
         <td data-slot="bars" aria-hidden="true">
           ${axis.map((t) => `<span data-slot="gridline" style="inset-inline-start:${t.pct.toFixed(3)}%"></span>`).join('')}
           <div data-slot="track">
@@ -394,7 +398,7 @@ function renderTable() {
         </td>
         <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(n)}</span></td>
         <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(weekReq)}</span></td>
-        <td data-slot="number"><span>${weekLimit(tier)}</span></td>
+        <td data-slot="number"><span>${m.welfare ? UNLIMITED : weekLimit(tier)}</span></td>
       </tr>`;
   }).join('');
 

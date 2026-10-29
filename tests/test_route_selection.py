@@ -223,18 +223,21 @@ class FailoverThroughHandlerTest(unittest.TestCase):
         return gen
 
     def test_down_vendor_fails_over_to_the_other(self):
-        """Qoder 连不上时，同一个请求要换到 WorkBuddy 跑完，客户端只看得到流。"""
+        """一家连不上时，同一个请求要换到另一家跑完，客户端只看得到流。
+
+        账号池按档位挑：WorkBuddy 国内优先，所以先试它，它挂了才轮到 Qoder。
+        """
         import qoder as q
 
         def broken(account, body, model):
-            self.calls.append(("qoder", account["provider"], model))
+            self.calls.append(("workbuddy", account["provider"], model))
             raise q.UpstreamError(0, "", "network error: refused")
             yield
-        with mock.patch.object(providers.get("qoder"), "chat_stream", broken), \
-                mock.patch.object(providers.get("workbuddy"), "chat_stream",
-                                  self._stream_ok("workbuddy")):
+        with mock.patch.object(providers.get("workbuddy"), "chat_stream", broken), \
+                mock.patch.object(providers.get("qoder"), "chat_stream",
+                                  self._stream_ok("qoder")):
             out = self._post("DeepSeek-V4.1-Flash", stream=True)
-        self.assertEqual([c[0] for c in self.calls], ["qoder", "workbuddy"])
+        self.assertEqual([c[0] for c in self.calls], ["workbuddy", "qoder"])
         self.assertIn(b'"content":"hi"', out)
         self.assertIn(b"[DONE]", out)
         self.assertNotIn(b"network error", out)
@@ -244,14 +247,14 @@ class FailoverThroughHandlerTest(unittest.TestCase):
         import workbuddy
 
         def rejected(account, body, model):
-            self.calls.append(("qoder", account["provider"], model))
+            self.calls.append(("workbuddy", account["provider"], model))
             raise workbuddy.UpstreamError(403, '{"code":"11128"}')
             yield
-        with mock.patch.object(providers.get("qoder"), "chat_stream", rejected), \
-                mock.patch.object(providers.get("workbuddy"), "chat_stream",
-                                  self._stream_ok("workbuddy")):
+        with mock.patch.object(providers.get("workbuddy"), "chat_stream", rejected), \
+                mock.patch.object(providers.get("qoder"), "chat_stream",
+                                  self._stream_ok("qoder")):
             out = self._post("DeepSeek-V4.1-Flash", stream=True)
-        self.assertEqual([c[0] for c in self.calls], ["qoder"])
+        self.assertEqual([c[0] for c in self.calls], ["workbuddy"])
         self.assertIn(b"upstream_rejected", out)
 
     def test_request_rejection_tries_another_account_same_vendor(self):
@@ -370,8 +373,11 @@ class FailoverThroughHandlerTest(unittest.TestCase):
     def test_price_change_does_not_rewrite_old_rows(self):
         """改价只影响之后的请求，旧行的 cost 不变。"""
         import pricing
+        # 按最终跑这个请求的上游 key 覆盖。账号池先挑 WorkBuddy 国内，
+        # 所以这个模型实际用的是它的 key，不是 Qoder 的 dfmodel。
         self.store.set_setting("model_prices",
-                               {"dfmodel": {"input": 10.0, "output": 20.0}})
+                               {"deepseek-v4.1-flash": {"input": 10.0,
+                                                        "output": 20.0}})
         with mock.patch.object(providers.get("qoder"), "chat_stream",
                                self._usage_stream("qoder")), \
                 mock.patch.object(providers.get("workbuddy"), "chat_stream",
@@ -391,8 +397,11 @@ class FailoverThroughHandlerTest(unittest.TestCase):
     def test_admin_price_override_reaches_billing(self):
         """定价页改过的单价要真的用在计费上，不能只改显示。"""
         import pricing
+        # 按最终跑这个请求的上游 key 覆盖。账号池先挑 WorkBuddy 国内，
+        # 所以这个模型实际用的是它的 key，不是 Qoder 的 dfmodel。
         self.store.set_setting("model_prices",
-                               {"dfmodel": {"input": 10.0, "output": 20.0}})
+                               {"deepseek-v4.1-flash": {"input": 10.0,
+                                                        "output": 20.0}})
         with mock.patch.object(providers.get("qoder"), "chat_stream",
                                self._usage_stream("qoder")), \
                 mock.patch.object(providers.get("workbuddy"), "chat_stream",

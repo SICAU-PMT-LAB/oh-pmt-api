@@ -165,7 +165,7 @@
         <div>
           <div class="eyebrow">Overview</div>
           <h2>概览</h2>
-          <p>你的额度、花费与最近的调用。日额度每天 0 点重置，周额度累计不重置。</p>
+          <p>你的额度、花费与最近的调用。日额度每天 0 点重置，周额度每周一 0 点重置。</p>
         </div>
         <div class="actions">
           <button class="btn small" id="btn-refresh">刷新</button>
@@ -582,7 +582,7 @@ function paintOverview() {
       <div class="d">PLAN ${money(plan.cost)} · API ${money(api.cost)}</div>
     </div>
     <div class="kpi">
-      <div class="k">累计消耗</div>
+      <div class="k">本周消耗</div>
       <div class="v"><span data-count="${q.used_total || 0}" data-dec="2">0</span><small>元</small></div>
       <div class="d">共 ${fmtInt(totals.requests || 0)} 次请求</div>
     </div>
@@ -604,11 +604,15 @@ function paintOverview() {
     ? `${new Date(q.reset_at * 1000).toLocaleTimeString('zh-CN',
         { hour: '2-digit', minute: '2-digit' })} 重置`
     : '';
+  const resetWeek = q.reset_total_at
+    ? `${fmtWhen(q.reset_total_at).slice(5, 16)} 重置`
+    : '';
   // 只报百分比：额度按模型各算一份，折算回成本反而会引起歧义
   document.getElementById('ov-quota').innerHTML =
     quotaLine('日额度', q.pct_today,
       q.pct_today != null ? (reset || '每天 0 点清零') : '不限') +
-    quotaLine('周额度', q.pct_total, q.pct_total != null ? '' : '不限');
+    quotaLine('周额度', q.pct_total,
+      q.pct_total != null ? (resetWeek || '每周一 0 点重置') : '不限');
 
   const bal = DASH.api.balance || 0;
   const apiSpent = api.cost || 0;

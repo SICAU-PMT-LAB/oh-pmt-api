@@ -9,7 +9,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import guard  # noqa: E402
-from store import Store, day_end, day_start  # noqa: E402
+from store import Store, day_end, day_start, week_end, week_start  # noqa: E402
 
 
 class TestIPGuard(unittest.TestCase):
@@ -223,13 +223,25 @@ class TestQuota(QuotaBase):
         self.assertEqual(ctx.exception.code, "quota_daily_exceeded")
 
     def test_total_limit(self):
-        """总限额不按天重置，昨天的消耗也算进去。"""
+        """周限额按自然周重置：本周内累计，上周的花费不算。"""
         m = self._member(limit_total=2.0)
-        self._spend(m["id"], 1.5, when=time.time() - 3 * 86400)
+        # 上周花的 1.5 元已经不占本周额度
+        self._spend(m["id"], 1.5, when=week_start() - 86400)
+        # 本周花 1.0，仍在额度内
+        self._spend(m["id"], 1.0)
+        guard.check_quota(self.store, m)
+        # 本周再花 1.0，累计 2.0 到 100% 就停
         self._spend(m["id"], 1.0)
         with self.assertRaises(guard.Denied) as ctx:
             guard.check_quota(self.store, m)
         self.assertEqual(ctx.exception.code, "quota_total_exceeded")
+
+    def test_week_window_resets_on_monday(self):
+        """周一 0 点整个周窗口清零：上周日刷满的成员周一能接着用。"""
+        m = self._member(limit_total=2.0)
+        # 上周日 23:59 刷满额度，那一刻会被拦
+        self._spend(m["id"], 2.5, when=week_start() - 60)
+        guard.check_quota(self.store, m)
 
     def test_under_limit_passes(self):
         m = self._member(limit_daily=10.0, limit_total=50.0)
@@ -281,6 +293,26 @@ class TestTimeWindows(unittest.TestCase):
         self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
         self.assertGreater(day_end(), time.time())
         self.assertAlmostEqual(day_end() - day_start(), 86400, delta=1)
+
+    def test_week_start_is_monday_midnight(self):
+        t = time.localtime(week_start())
+        self.assertEqual(t.tm_wday, 0)
+        self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
+        self.assertLessEqual(week_start(), time.time())
+
+    def test_week_end_is_next_monday(self):
+        t = time.localtime(week_end())
+        self.assertEqual(t.tm_wday, 0)
+        self.assertEqual((t.tm_hour, t.tm_min, t.tm_sec), (0, 0, 0))
+        self.assertGreater(week_end(), time.time())
+        self.assertAlmostEqual(week_end() - week_start(), 7 * 86400, delta=1)  # DST 不影响测试机器
+
+    def test_week_start_crosses_month(self):
+        """跨月归一化：月初落在周中时要回到上个月的周一。"""
+        # 2025-02-01 是周六，那一周的周一是 2025-01-27
+        t = time.localtime(week_start(
+            time.mktime((2025, 2, 1, 12, 0, 0, 0, 0, -1))))
+        self.assertEqual((t.tm_year, t.tm_mon, t.tm_mday), (2025, 1, 27))
 
 
 class TestStore(QuotaBase):

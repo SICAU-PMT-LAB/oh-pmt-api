@@ -1,4 +1,4 @@
-"""按 token 计价与日/总限额的测试。
+"""按 token 计价与日/周限额的测试。
 
 单价是 per 1M tokens 的人民币元（取自各家官方中文定价页），
 成本 = 各类 token × 各自单价 / 100 万，成员的额度也用元表示，到 100% 就停服。
@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import guard  # noqa: E402
 import pricing  # noqa: E402
-from store import Store  # noqa: E402
+from store import Store, week_start  # noqa: E402
 
 
 class CostOfTest(unittest.TestCase):
@@ -160,7 +160,7 @@ class RetiredTest(unittest.TestCase):
 
 
 class LimitTest(unittest.TestCase):
-    """日限额按本地 0 点重置，总限额不重置，任一窗口到 100% 就拒绝。"""
+    """日限额本地 0 点重置，周限额周一 0 点重置，任一窗口到 100% 就拒绝。"""
 
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -196,10 +196,10 @@ class LimitTest(unittest.TestCase):
         self._spend(m["id"], 0.9999)
         guard.check_quota(self.store, m)
 
-    def test_daily_resets_but_total_does_not(self):
-        m = self._member(limit_daily=1.0, limit_total=1.5)
-        # 昨天花掉的：不占今天的日限额，但占总额度
-        self._spend(m["id"], 1.4, when=time.time() - 86400)
+    def test_week_accumulates_across_days(self):
+        m = self._member(limit_daily=100.0, limit_total=1.5)
+        # 本周一 0 点的那笔已不占今天的日额度，但仍占本周额度
+        self._spend(m["id"], 1.4, when=week_start())
         guard.check_quota(self.store, m)
         self._spend(m["id"], 0.2)
         with self.assertRaises(guard.Denied) as ctx:

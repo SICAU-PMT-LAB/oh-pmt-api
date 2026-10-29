@@ -304,6 +304,46 @@
      已经被内容撑开的宽度，画出来比容器还宽，窄屏下右边就被切掉。 */
   .chart-card, .grid2 > *, .calls, .topcard { min-width: 0; }
 
+  /* 详情页内的编辑区。原来编辑是成员列表上的弹窗，搬到详情页之后
+     要跟卡片同一个内边距口径。 */
+  .edit-panel .edit-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .edit-panel .field.wide { grid-column: 1 / -1; }
+  .edit-panel .edit-model-tools {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 8px 0;
+  }
+  .edit-panel .edit-model-tools .hint { margin: 0; }
+  .edit-panel .model-src-row {
+    display: grid; grid-template-columns: minmax(120px, 200px) 1fr;
+    gap: 10px; align-items: baseline;
+    padding: 6px 0; border-bottom: 1px dashed var(--p-line);
+  }
+  .edit-panel .model-src-row:last-child { border-bottom: none; }
+  .edit-panel .model-src-name { font-size: 13px; color: var(--p-text); }
+  .edit-panel .model-src-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .edit-panel .limit-editor { max-height: 300px; overflow: auto; }
+  .edit-panel .limit-row {
+    display: grid; grid-template-columns: minmax(120px, 1fr) 110px 110px;
+    gap: 10px; align-items: center; padding: 6px 0;
+    border-bottom: 1px dashed var(--p-line);
+  }
+  .edit-panel .limit-row:last-child { border-bottom: none; }
+  .edit-panel .limit-row .name { font-size: 13px; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .edit-panel .limit-row input {
+    width: 100%; padding: 5px 8px; font-size: 12.5px;
+    border: 1px solid var(--p-line); border-radius: 6px;
+    background: var(--p-surface); color: var(--p-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .edit-panel .limit-row .head {
+    font-size: 11px; color: var(--p-text-faint); text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
   @media (max-width: 1040px) {
     .topgrid { grid-template-columns: 1fr 1fr; }
     .topgrid > :nth-child(3) { grid-column: 1 / -1; }
@@ -313,6 +353,12 @@
     .hero .rings { flex-wrap: wrap; }
   }
   @media (max-width: 620px) {
+    .edit-panel .edit-grid { grid-template-columns: minmax(0, 1fr); }
+    .edit-panel .model-src-row { grid-template-columns: minmax(0, 1fr); }
+    .edit-panel .limit-row {
+      grid-template-columns: 1fr 1fr; grid-template-areas: 'name name' 'd t';
+    }
+    .edit-panel .limit-row .name { grid-area: name; }
     /* 三个方框并排在 390px 下每格只剩一百出头，标题会拆成两行。
        改成环占左上一整列、两个数字格子叠在右边。 */
     .hero .rings {
@@ -425,6 +471,57 @@
   <main class="main" id="main">
     <div class="empty">正在读取…</div>
   </main>
+
+  <!-- 成员编辑区：放在 #main 之外。render() 会整个重写 #main 的
+       innerHTML，面板如果住在里面，每次重绘（保存后 load()）都会被抹掉。 -->
+  <div class="card edit-panel" id="edit-panel" hidden>
+    <div class="card-head">
+      <h3 class="section" style="margin:0" id="edit-title">编辑成员</h3>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn small" id="btn-edit-cancel">取消</button>
+      <button class="btn small primary" id="btn-edit-save">保存</button>
+    </div>
+    <div class="edit-grid">
+      <div class="field"><label for="e-name">名字</label>
+        <input id="e-name" maxlength="60"></div>
+      <div class="field"><label for="e-email">邮箱（可选）</label>
+        <input id="e-email" maxlength="120"></div>
+      <div class="field"><label for="e-username">登录账号</label>
+        <input id="e-username" maxlength="60" placeholder="留空则不设"></div>
+      <div class="field"><label for="e-tier">档位</label>
+        <select id="e-tier"></select></div>
+      <div class="field"><label for="e-daily">日限额（元，0 = 跟随档位）</label>
+        <input id="e-daily" type="number" step="0.01" min="0"></div>
+      <div class="field"><label for="e-total">周限额（元，0 = 跟随档位）</label>
+        <input id="e-total" type="number" step="0.01" min="0"></div>
+      <div class="field wide"><label for="e-account">优先账号</label>
+        <select id="e-account"></select>
+        <div class="hint">软绑定：优先账号能跑这个模型时固定用它，
+          跑不了或上游出错时才会换到别的账号。</div></div>
+      <div class="field wide"><label for="e-note">备注</label>
+        <input id="e-note" maxlength="120"></div>
+    </div>
+
+    <div class="field" style="margin-top:16px">
+      <label>可用模型 · 按模型勾选，不再分厂商</label>
+      <div class="edit-model-tools">
+        <button class="btn small" id="e-models-all">全选</button>
+        <button class="btn small" id="e-models-none">清空（不限）</button>
+        <span class="hint" id="e-models-hint">一个都不选表示不限制模型。</span>
+      </div>
+      <div class="chip-picker" id="e-models"></div>
+    </div>
+
+    <div class="field" style="margin-top:16px">
+      <label>按模型的额度（元）· 日与周各自独立</label>
+      <div class="hint" style="margin-bottom:8px">
+        每个窗口默认跟随档位。只填日限额就只改日限额；填了数字之后，
+        这个模型自己的百分比到 100% 就只停它。
+      </div>
+      <div id="e-limits" class="limit-editor"></div>
+    </div>
+  </div>
+
 
   <footer class="panel-foot">
     <span>© <span id="year">2026</span> Prometheus Lab · 成员详情</span>
@@ -729,7 +826,7 @@ function render() {
       </div>
       <div class="actions">
         <a class="btn small" href="/admin#members">← 成员列表</a>
-        <button class="btn small" id="btn-edit">编辑额度</button>
+        <button class="btn small primary" id="btn-edit">编辑</button>
       </div>
     </div>
 
@@ -881,6 +978,209 @@ async function keyAction(btn) {
     }
     await load();
   } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ───────── 详情页内的编辑 ─────────
+   原来的编辑是成员列表上的弹窗，模型要分厂商两层点选。现在搬进详情页：
+   模型按名字平铺、一个模型一行，同一模型有多家来源时并排显示，点任意一家
+   即启用该模型。库里存的仍是 `厂商:上游key`，保存时按勾选原样回写。 */
+let ED = null;        // {models, accounts, providers, picked:Set, limits:{}}
+
+async function openEdit() {
+  const d = DATA; if (!d) return;
+  const m = d.member;
+  ED = { models: [], accounts: [], providers: [], picked: new Set(), limits: {} };
+  try {
+    // 模型目录与厂商表随详情接口一起给，只有优先账号下拉要再拉一次账号表
+    const a = await api('/api/accounts');
+    ED.models = d.catalog || [];
+    ED.providers = d.providers || [];
+    ED.accounts = a.accounts || [];
+  } catch (e) { toast(e.message, 'err'); return; }
+
+  // 已允许的来源：旧数据可能是上游 key、模型名或 `厂商:key`，三种都留着
+  const allowed = (m.model_allowlist || '').split(',').map(x => x.trim()).filter(Boolean);
+  ED.picked = new Set(allowed);
+
+  document.getElementById('e-name').value = m.name || '';
+  document.getElementById('e-email').value = m.email || '';
+  document.getElementById('e-username').value = m.username || '';
+  document.getElementById('e-note').value = m.note || '';
+  document.getElementById('e-daily').value = m.limit_daily > 0 ? m.limit_daily : '';
+  document.getElementById('e-total').value = m.limit_total > 0 ? m.limit_total : '';
+
+  const tiers = (d.plans && d.plans.length) ? d.plans
+    : [{ slug: 'go', name: 'Go' }, { slug: 'plus', name: 'Plus' },
+       { slug: 'pro', name: 'Pro' }, { slug: 'max', name: 'Max' }];
+  document.getElementById('e-tier').innerHTML = tiers.map(t =>
+    `<option value="${esc(t.slug)}"${t.slug === (m.tier || 'plus') ? ' selected' : ''}>${
+      esc(t.name || String(t.slug).toUpperCase())}</option>`).join('');
+
+  // 优先账号：按厂商分组，同一厂商内标出区域
+  const byProv = {};
+  ED.accounts.forEach(a => { (byProv[a.provider] = byProv[a.provider] || []).push(a); });
+  const opts = ['<option value="">共用账号池（不指定）</option>'];
+  Object.keys(byProv).forEach(slug => {
+    const p = ED.providers.find(x => x.slug === slug);
+    opts.push(`<optgroup label="${esc(p ? p.label : slug)}">`);
+    byProv[slug].forEach(a => {
+      const sel = a.id === m.preferred_account_id ? ' selected' : '';
+      const nm = a.name || a.email || a.uid || ('#' + a.id);
+      const rg = a.region && a.region !== 'default' ? ` · ${a.region}` : '';
+      opts.push(`<option value="${a.id}"${sel}>${esc(nm)}${esc(rg)}${
+        (a.enabled === false || a.enabled === 0) ? '（已停用）' : ''}</option>`);
+    });
+    opts.push('</optgroup>');
+  });
+  document.getElementById('e-account').innerHTML = opts.join('');
+
+  ED.limits = {};
+  (d.model_quota_editable || []).forEach(r => {
+    ED.limits[r.id] = { name: r.name, daily: r.limit_daily, total: r.limit_total };
+  });
+
+  renderEditModels();
+  renderEditLimits();
+  document.getElementById('edit-panel').hidden = false;
+  document.getElementById('edit-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeEdit() {
+  const p = document.getElementById('edit-panel');
+  if (p) p.hidden = true;
+  ED = null;
+}
+
+// 一个模型的全部来源 spec；目录没有 sources 时退回模型 id
+function modelSpecs(m) {
+  const srcs = m.sources || [{ spec: m.id, provider: m.provider }];
+  return srcs.map(s => s.spec || s.id || m.id);
+}
+
+// 这个模型是否被允许：任一来源命中就算
+function modelOn(m) {
+  return modelSpecs(m).some(sp => ED.picked.has(sp));
+}
+
+function renderEditModels() {
+  const box = document.getElementById('e-models');
+  if (!ED) return;
+  // 已选但目录里已经没有的写法（已下架、旧数据）也要显示出来，
+  // 否则管理员一保存就把它们悄悄抹掉了
+  const known = new Set();
+  ED.models.forEach(m => modelSpecs(m).forEach(sp => known.add(sp)));
+  const extras = [...ED.picked].filter(v => !known.has(v));
+
+  const rows = ED.models.map(m => {
+    const srcs = m.sources || [{ spec: m.id }];
+    const chips = srcs.map(s => {
+      const sp = s.spec || s.id || m.id;
+      const p = ED.providers.find(x => x.slug === (s.provider || m.provider));
+      const label = p ? p.label : (s.provider || '');
+      const region = s.region && s.region !== 'default' ? s.region : '';
+      return `<button type="button" class="chip ${ED.picked.has(sp) ? 'on' : ''}"
+        data-spec="${esc(sp)}" title="${esc(sp)}">
+        <span class="tick">✓</span>${esc(label)}${region
+          ? ` <span class="chip-prov">${esc(region)}</span>` : ''}</button>`;
+    }).join('');
+    return `<div class="model-src-row" data-model-row="${esc(m.id)}">
+      <div class="model-src-name">${esc(m.name || m.id)}</div>
+      <div class="model-src-chips">${chips}</div>
+    </div>`;
+  }).join('');
+
+  const extraRow = extras.length ? `<div class="model-src-row">
+      <div class="model-src-name">其他</div>
+      <div class="model-src-chips">${extras.map(v => `<button type="button"
+        class="chip on" data-spec="${esc(v)}"><span class="tick">✓</span>${
+        esc(v)}</button>`).join('')}</div></div>` : '';
+
+  box.innerHTML = (rows + extraRow) ||
+    '<span class="hint">没读到模型目录，先接入一个可用账号。</span>';
+  box.querySelectorAll('[data-spec]').forEach(b => {
+    b.addEventListener('click', () => {
+      const sp = b.dataset.spec;
+      if (ED.picked.has(sp)) ED.picked.delete(sp); else ED.picked.add(sp);
+      renderEditModels();
+    });
+  });
+  updateEditModelHint();
+}
+
+function updateEditModelHint() {
+  const el = document.getElementById('e-models-hint');
+  if (!el || !ED) return;
+  el.textContent = ED.picked.size
+    ? `已允许 ${ED.picked.size} 条来源`
+    : '一个都不选表示不限制模型。';
+}
+
+function renderEditLimits() {
+  const box = document.getElementById('e-limits');
+  if (!ED) return;
+  const rows = Object.entries(ED.limits);
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint">没有可调额度的模型。</div>';
+    return;
+  }
+  box.innerHTML = `<div class="limit-row">
+      <span class="head">模型</span><span class="head">日限额</span>
+      <span class="head">周限额</span></div>` +
+    rows.map(([id, r]) => `<div class="limit-row" data-lim="${esc(id)}">
+      <span class="name" title="${esc(r.name)}">${esc(r.name)}</span>
+      <input type="number" step="0.01" min="0" data-window="daily"
+        placeholder="跟随档位" value="${r.daily == null ? '' : r.daily}">
+      <input type="number" step="0.01" min="0" data-window="total"
+        placeholder="跟随档位" value="${r.total == null ? '' : r.total}">
+    </div>`).join('');
+  // 边输边记，保存时不必再扫一遍 DOM
+  box.querySelectorAll('[data-lim]').forEach(row => {
+    row.querySelectorAll('input[data-window]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const cur = ED.limits[row.dataset.lim];
+        const v = inp.value.trim();
+        cur[inp.dataset.window] = v === '' ? null : Number(v);
+      });
+    });
+  });
+}
+
+async function saveEdit(btn) {
+  if (!ED) return;
+  const body = {
+    name: document.getElementById('e-name').value.trim(),
+    email: document.getElementById('e-email').value.trim(),
+    note: document.getElementById('e-note').value.trim(),
+    tier: document.getElementById('e-tier').value,
+    limit_daily: Number(document.getElementById('e-daily').value) || 0,
+    limit_total: Number(document.getElementById('e-total').value) || 0,
+    // 空字符串要发 null，不能发 0：0 会被当成「指定了一个不存在的账号」
+    preferred_account_id: Number(document.getElementById('e-account').value) || null,
+    model_allowlist: [...ED.picked].join(','),
+  };
+  const uname = document.getElementById('e-username').value.trim();
+  if (uname) body.username = uname;
+  if (!body.name) { toast('名字不能为空', 'err'); return; }
+
+  // 按模型的额度：只提交改过的窗口，没改的不传＝继续跟随档位
+  const limits = {};
+  Object.entries(ED.limits).forEach(([id, r]) => {
+    const cell = {};
+    if (r.daily != null) cell.daily = r.daily;
+    if (r.total != null) cell.total = r.total;
+    if (Object.keys(cell).length) limits[r.name] = cell;
+  });
+  body.model_limits = limits;
+
+  btn.disabled = true;
+  try {
+    await api('/api/members/' + MEMBER_ID, {
+      method: 'PATCH', body: JSON.stringify(body) });
+    toast('已保存');
+    closeEdit();
+    await load();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
 }
 
 /* 发放 API 余额：调 /api/members/<id>/topup，成功后刷新页面里的余额。 */
@@ -1135,13 +1435,31 @@ function bindEvents() {
   if (bound) return;
   bound = true;
   const main = document.getElementById('main');
+  // 编辑面板住在 #main 之外（render 会整体重写 #main），
+  // 所以它的按钮单独绑一次，不走下面那套委托。
+  const panel = document.getElementById('edit-panel');
+  if (panel && !panel.dataset.bound) {
+    panel.dataset.bound = '1';
+    panel.addEventListener('click', e => {
+      const t = e.target.closest('#btn-edit-cancel,#btn-edit-save,#e-models-all,#e-models-none');
+      if (!t) return;
+      if (t.id === 'btn-edit-cancel') return closeEdit();
+      if (t.id === 'btn-edit-save') return saveEdit(t);
+      if (t.id === 'e-models-all') {
+        ED.models.forEach(m => modelSpecs(m).forEach(sp => ED.picked.add(sp)));
+        return renderEditModels();
+      }
+      if (t.id === 'e-models-none') { ED.picked.clear(); return renderEditModels(); }
+    });
+  }
 
   main.addEventListener('click', e => {
     const t = e.target.closest('[data-view],[data-detail],[data-days],[data-prov],'
-      + '#pg-prev,#pg-next,#btn-edit,[data-kact],[data-mact],[data-topup]');
+      + '#pg-prev,#pg-next,#btn-edit,#btn-edit-cancel,#btn-edit-save,'
+      + '#e-models-all,#e-models-none,[data-kact],[data-mact],[data-topup]');
     if (!t || !main.contains(t)) return;
 
-    if (t.id === 'btn-edit') { location.href = '/admin#members'; return; }
+    if (t.id === 'btn-edit') { openEdit(); return; }
     if (t.dataset.topup !== undefined) { openTopup(); return; }
 
     if (t.dataset.kact) { keyAction(t); return; }

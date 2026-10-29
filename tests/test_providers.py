@@ -18,14 +18,16 @@ from store import Store  # noqa: E402
 
 
 class ProviderRegistryTest(unittest.TestCase):
-    def test_all_four_vendors_registered(self):
+    def test_all_five_vendors_registered(self):
         slugs = {p.slug for p in providers.PROVIDERS.values()}
-        self.assertEqual(slugs, {"qoder", "workbuddy", "cline", "commandcode"})
+        self.assertEqual(slugs, {"qoder", "workbuddy", "welfare",
+                                 "cline", "commandcode"})
 
     def test_only_implemented_vendors_available(self):
-        # qoder 与 workbuddy 有真实协议；cline / commandcode 仍是占位
+        # qoder / workbuddy / welfare 有真实协议；cline / commandcode 仍是占位
         self.assertTrue(providers.get("qoder").available)
         self.assertTrue(providers.get("workbuddy").available)
+        self.assertTrue(providers.get("welfare").available)
         for slug in ("cline", "commandcode"):
             self.assertFalse(providers.get(slug).available, slug)
 
