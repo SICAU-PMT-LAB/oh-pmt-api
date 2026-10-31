@@ -142,7 +142,7 @@ class RetiredTest(unittest.TestCase):
     def test_kept_models_are_not_retired(self):
         for name in ("hy3", "deepseek-v4.1-flash", "dfmodel",
                      "glm-5.3-flash", "gfmodel", "minimax-m3.1-flash",
-                     "space-bunny", "step-5-preview", "mimo-v2.6-pro",
+                     "step-5-preview", "mimo-v2.6-pro",
                      "qmodel_38max", "qfmodel", "kimi-k3.1-pro"):
             with self.subTest(name=name):
                 self.assertFalse(pricing.retired(name), name)
@@ -151,6 +151,13 @@ class RetiredTest(unittest.TestCase):
         """一个对外名字对应多家上游时，任一路由下架就整条下架。"""
         self.assertTrue(pricing.retired("deepseek-v4.1-flash",
                                         "DeepSeek-V4-Flash"))
+
+    def test_models_withdrawn_from_members(self):
+        """Kimi-K3 与 Space-Bunny 不对成员开放，两条上游 key 都要能挡住。"""
+        for name in ("kimi-k3", "Kimi-K3", "kimi-k3-1", "kmodel_latest",
+                     "space-bunny", "Space-Bunny"):
+            with self.subTest(name=name):
+                self.assertTrue(pricing.retired(name), name)
 
     def test_retired_models_keep_their_price(self):
         """下架不等于删价：历史行回填和对账还要按当时的口径算得出来。"""

@@ -129,7 +129,7 @@ function render() {
   const rows = ACCOUNTS;
   const usable = rows.filter(a => a.enabled && !(a.cooldown > 0)).length;
   const remaining = rows.reduce((s, a) => s + (a.credits_remaining || 0), 0);
-  const pendingCheckin = rows.filter(a => a.supports_checkin && !a.checkin_at).length;
+  const pendingCheckin = rows.filter(a => a.supports_checkin && !a.checkin_today).length;
 
   const sub = rows.length
     ? `${rows.length} 个账号 · ${usable} 可用 · 剩余 ${fmtCompact(remaining)} 积分`
@@ -212,7 +212,7 @@ function card(a) {
     </div>
     <div>
       <div class="mono" style="font-size:12px">${a.credits_remaining.toFixed(1)}
-        <span style="color:var(--ink-faint)">/ ${a.credits_total.toFixed(0)}</span></div>
+        <span style="color:var(--ink-faint)">/ ${a.credits_total.toFixed(0)} 累计</span></div>
       <div class="progress ${pct <= 10 ? 'err' : pct <= 30 ? 'warn' : ''}"
            style="margin-top:5px"><div data-w="${pct.toFixed(1)}"></div></div>
       <div class="as" style="margin-top:5px">已用 ${a.credits_used.toFixed(1)} · ${expire}</div>
@@ -221,8 +221,10 @@ function card(a) {
       <div style="font-size:12.5px">${fmtInt(a.requests)} 次</div>
       <div class="as">${fmtCompact(a.tokens)} Token · ${fmtMoney(a.gateway_cost)} 成本</div>
       ${a.supports_checkin ? `<div class="as">${
-        a.checkin_at ? '签到 ' + (a.checkin_ok ? '✓ ' + esc(a.checkin_message || '已签到')
-          : '✕ ' + esc(a.checkin_message || '失败')) : '今天还没签到'}</div>` : ''}
+        a.checkin_at ? (a.checkin_today ? '签到 ' + (a.checkin_ok ? '✓ ' + esc(a.checkin_message || '已签到')
+          : '✕ ' + esc(a.checkin_message || '失败'))
+          : '上次签到：' + esc(a.checkin_message || '无') + '（今天还没签）')
+          : '今天还没签到'}</div>` : ''}
     </div>
     <div class="acts">
       ${state}

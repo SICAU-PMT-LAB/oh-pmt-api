@@ -221,13 +221,38 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(rows[-1]["id"], "hy3")
 
     def test_paid_models_have_finite_request_counts(self):
-        """Hy3 与 Space-Bunny 都按官方价计费，不再有无限额度那个特例。"""
+        """Hy3 与 Space-Bunny 都按官方价计费，不能当成免费模型。"""
         for model in ("hy3", "space-bunny"):
             price, _ = pricing.lookup(model)
             self.assertGreater(plans.session_cost(price,
                                   plans.REQUEST_PROFILES[model]), 0, model)
             self.assertIsNotNone(plans.requests_for_budget(
                 5.0, price, plans.REQUEST_PROFILES[model]), model)
+
+    def test_hy3_has_no_quota(self):
+        """Hy3 不限额：不占额度池，plan 页也不给请求次数。"""
+        self.assertTrue(plans.unlimited("hy3"))
+        self.assertTrue(plans.unlimited("Hy3"))
+        self.assertFalse(plans.unlimited("hy4-preview"))
+        row = plans.catalog({"hy3": {
+            "name": "Hy3", "provider": "workbuddy",
+            "routes": [{"model": "hy3"}]}}, {})[0]
+        self.assertTrue(row["unlimited"])
+        self.assertIsNone(row["daily"]["plus"])
+
+    def test_model_limits_table_is_scaled_per_tier(self):
+        """MODEL_LIMITS 是 Plus 的数字，其他档按档位比例缩放。"""
+        self.assertEqual(plans.model_limit("deepseek-v4.1-flash"), (20.0, 100.0))
+        self.assertEqual(plans.model_limit("DeepSeek-V4.1-Flash"), (20.0, 100.0))
+        self.assertIsNone(plans.model_limit("no-such-model"))
+        plus = plans.scale_for(15.0, 75.0, ("deepseek-v4.1-flash",))
+        self.assertEqual(plus, (20.0, 100.0))
+        go = plans.scale_for(5.0, 25.0, ("deepseek-v4.1-flash",))
+        self.assertAlmostEqual(go[0], 20.0 * 5.0 / 15.0)
+        self.assertAlmostEqual(go[1], 100.0 * 25.0 / 75.0)
+        # 没配额度的模型拿预算本身，与改造前一致
+        self.assertEqual(plans.scale_for(30.0, 150.0, ("no-such-model",)),
+                         (30.0, 150.0))
 
     def test_kimi_k3_profile_and_price_are_its_own_tier(self):
         """Kimi-K3 与 K3.1-Pro 是两代两价，画像与单价都不能串。"""

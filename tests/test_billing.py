@@ -269,6 +269,55 @@ class ModelQuotaTest(unittest.TestCase):
         self.assertEqual(set(got), {"模型 B"})
         self.assertEqual(got["模型 B"]["limit_daily"], 3.0)
 
+    def test_model_limits_table_applies_without_db_rows(self):
+        """plans.MODEL_LIMITS 里的模型不必写库就已经生效。"""
+        models = {"deepseek-v4.1-flash": "DeepSeek-V4.1-Flash"}
+        mq = guard.model_quota(self.store, self.member, models)
+        row = mq["models"][0]
+        self.assertEqual(row["limit_daily"], 20.0)
+        self.assertEqual(row["limit_total"], 100.0)
+        # 没有修改过，不该被标成「已调」
+        self.assertFalse(row["overridden"])
+
+    def test_db_override_wins_over_the_table(self):
+        """管理员在弹窗里改过的数字要赢过代码里的默认表。"""
+        models = {"deepseek-v4.1-flash": "DeepSeek-V4.1-Flash"}
+        self.store.set_model_limits(self.mid,
+                                    {"DeepSeek-V4.1-Flash": {"daily": 1.5}})
+        mq = guard.model_quota(self.store, self.member, models)
+        row = mq["models"][0]
+        self.assertEqual(row["limit_daily"], 1.5)
+        self.assertTrue(row["overridden"])
+        # 只改了日窗口，周窗口仍取表里的值
+        self.assertEqual(row["limit_total"], 100.0)
+
+    def test_member_daily_cap_scales_model_limits(self):
+        """成员的全局日限额仍是总量封顶：模型额度按比例缩。
+
+        曾经把 MODEL_LIMITS 直接写进库，结果管理员给成员设的
+        0.000001 元/天被 deepseek 的 20 元/天盖掉，手工限额形同虚设。
+        """
+        models = {"deepseek-v4.1-flash": "DeepSeek-V4.1-Flash"}
+        self.store.update_member(self.mid, limit_daily=7.5)  # plus 的一半
+        member = self.store.get_member(self.mid)
+        mq = guard.model_quota(self.store, member, models)
+        row = mq["models"][0]
+        self.assertAlmostEqual(row["limit_daily"], 10.0, places=6)
+        # 周窗口没改过，仍按档位比例，所以周额度不缩
+        self.assertAlmostEqual(row["limit_total"], 100.0, places=6)
+
+    def test_unlimited_model_is_never_blocked(self):
+        """Hy3 不限额：花再多也不被单模型额度拦，也不推进池子。"""
+        models = {"hy3": "Hy3", "a": "模型 A"}
+        self._spend("hy3", 9999.0)
+        mq = guard.model_quota(self.store, self.member, models)
+        row = [r for r in mq["models"] if r["label"] == "Hy3"][0]
+        self.assertEqual(row["limit_daily"], 0.0)
+        self.assertIsNone(row["pct_daily"])
+        guard.check_model_quota(self.store, self.member, self.key, "Hy3")
+        # 池子不受它影响：模型 A 花了 0，池子就是 0
+        self.assertAlmostEqual(mq["pct_daily"], 0.0, places=2)
+
 
 class BillingApiTest(unittest.TestCase):
     """走 Handler 的接口层：tier 校验与充值入参。"""

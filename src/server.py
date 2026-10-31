@@ -291,13 +291,17 @@ def checkin_one(account: dict) -> dict:
 
     「到账多少积分」按签到前后上游额度的差额算：活动面额只是预期值，
     实际可能延迟到账、或按人去重后本号不发。
+
+    基准必须现拉：库里那份快照可能是几小时前的，拿它当 before 会把这段时间
+    的真实消耗和本次签到奖励混在一起，算出负数或 0。
     """
     store = get_store()
     prov = providers.get(account.get("provider"))
     acc = ensure_fresh_token(account)
-    before = None
-    if account["credits_synced_at"]:
-        before = float(account["credits_remaining"] or 0)
+
+    # 签到前先同步一次：既是本次差额的基准，也把上游刚扣掉的消耗落下
+    base = sync_account_credits(account)
+    before = float(base["remaining"]) if base is not None else None
 
     res = prov.checkin(acc)
 
@@ -311,11 +315,13 @@ def checkin_one(account: dict) -> dict:
             earned = round(delta, 4)
             message = f"签到成功，到账 {earned:g} 积分"
         elif res.get("claimed"):
-            # 领取成功但额度没动：如实说清楚，别把面额当到账
+            # 领取成功但额度还没动：如实说清楚，别把面额当到账。
+            # 上游结算有 1-2 分钟延迟，拉一次最新额度就是下一次同步的事。
             message = (f"已领取 {res['claimed']} 个活动（面额 "
-                       f"{res.get('declared', 0):g} 积分），上游额度暂未变化")
+                       f"{res.get('declared', 0):g} 积分），到账尚未结算，稍后同步可见")
     store.set_account_checkin(account["id"], ok=res["ok"],
-                              earned=earned, message=message)
+                              earned=earned, message=message,
+                              claimed=res.get("done"))
     return {**res, "earned": earned, "message": message,
             "account_id": account["id"],
             "name": account["name"] or account["email"] or acc["uid"][:8],
@@ -2589,6 +2595,9 @@ class Handler(BaseHTTPRequestHandler):
                 "tokens": st.get("tokens", 0),
                 "by_model": st.get("by_model", []),
                 "checkin_at": a["checkin_at"] or None,
+                # 今天是否已签：checkin_at 只存时间戳，跨天后自然变旧
+                "checkin_today": bool(a["checkin_at"])
+                                 and a["checkin_at"] >= day_start(),
                 "checkin_ok": bool(a["checkin_ok"]),
                 "checkin_earned": a["checkin_earned"],
                 "checkin_message": a["checkin_message"],
@@ -3294,8 +3303,12 @@ class Handler(BaseHTTPRequestHandler):
             # 请求量 / Token / 成本 · 成功率
             "today": today,
             "all_time": all_time,
-            "checkin_pending": sum(1 for a in accounts if not a["checkin_at"]
-                                   and providers.get(a["provider"]).supports_checkin),
+            # 今天还没签的数量：按「今天」而不是「从没签过」算，否则签过一轮
+            # 之后这个数永远是 0，面板上再也看不到待签提示
+            "checkin_pending": sum(1 for a in accounts
+                                   if providers.get(a["provider"]).supports_checkin
+                                   and a["enabled"]
+                                   and (not a["checkin_at"] or a["checkin_at"] < day_start())),
         }
 
     @staticmethod
@@ -3936,12 +3949,65 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
 
+def _daily_maintenance():
+    """后台维护：定时自动签到 + 刷新额度快照。
+
+    以前这两件事只在管理员点按钮时发生，导致快照可能停在几小时前，
+    而额度又是账号页判断余量的唯一依据。
+
+    PMT_AUTO_MAINTENANCE=0 关掉（本地调试不要真去动上游账号）；
+    PMT_CHECKIN_HOUR 指定每天几点自动签到，默认 0 点是刚过就签。
+    """
+    store = get_store()
+    last_checkin_day = None
+    last_sync = 0.0
+    sync_every = max(300, int(_env("SYNC_INTERVAL", "1800")))
+    while True:
+        try:
+            now = time.time()
+            today = day_start(now)
+            # 先刷新额度：签到前的基准要是新的
+            if now - last_sync >= sync_every:
+                for acc in store.list_accounts():
+                    if acc["enabled"] and not acc.get("welfare"):
+                        try:
+                            sync_account_credits(acc)
+                        except Exception:  # noqa: BLE001
+                            pass
+                last_sync = now
+            # 自动签到：每天一次，只对支持签到的厂商、且今天还没签的账号
+            hour = int(_env("CHECKIN_HOUR", "0"))
+            if last_checkin_day != today and time.localtime(now).tm_hour >= hour:
+                last_checkin_day = today
+                for acc in store.list_accounts():
+                    if (not acc["enabled"]
+                            or not providers.get(acc["provider"]).supports_checkin
+                            or (acc["checkin_at"] and acc["checkin_at"] >= today)):
+                        continue
+                    try:
+                        checkin_one(acc)
+                    except Exception:  # noqa: BLE001
+                        continue
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        time.sleep(300)
+
+
+def start_maintenance():
+    """启不动自己会退出的后台线程：一个实例只跑一份。"""
+    if _env("AUTO_MAINTENANCE", "1") == "0":
+        return
+    threading.Thread(target=_daily_maintenance, name="maintenance",
+                     daemon=True).start()
+
+
 def main():
     host = _env("HOST", "127.0.0.1")
     port = int(_env("PORT", "8791"))
     get_store()
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
+    start_maintenance()
     print(f"oh-pmt-api v{APP_VERSION} 监听 http://{host}:{port}")
     try:
         server.serve_forever()

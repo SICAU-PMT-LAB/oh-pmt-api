@@ -137,6 +137,12 @@ RETIRED: tuple[str, ...] = (
     "deepseek-v4-flash-vision-exp",
     "glm-5.2", "glm-5.1", "glm-5", "glm-5v-turbo",
     "kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code",
+    # K3 只给内部用，不对成员开放：它的两条上游路由（qoder kmodel_latest
+    # 与 workbuddy kimi-k3-1）一起下架，价目表保留给历史行对账。
+    "kimi-k3", "kimi-k3-1", "kmodel_latest",
+    # Space-Bunny 不开放给成员。它的白名单本来就没发给任何人，但在目录里
+    # 照样占一行、在 plan 页显示一份用不了的额度，反而让人以为能用。
+    "space-bunny",
     "minimax-m2.7", "minimax-m3",
     "hunyuan-chat",           # 已被 Hy3 取代
     "qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max",

@@ -207,6 +207,35 @@ def _forbidden(model: str, allowed: set[str],
     return f"该密钥不允许使用模型 {model}，可用：{', '.join(names)}"
 
 
+def _scaled_model_limit(member: dict, model_id: str,
+                        model_label: str) -> tuple[float, float] | None:
+    """plans.MODEL_LIMITS 里这个模型的额度，按成员的实际额度等比缩放。
+
+    不直接返回表里的数字，是因为 member.limit_daily / limit_total 这两个
+    管理员手工覆盖值要能继续当「总量封顶」用：把它们当分母与档位比一下，
+    模型额度跟着缩，各模型份额之和仍然落在管理员给的那个总预算附近。
+    不缩放的话，给一个成员设 0.000001 元/天也会被 deepseek 的 20 元/天
+    盖掉，手工限额就形同虚设。
+
+    模型没配、或档位查不到时返回 None，调用方回退到档位那一份。
+    """
+    base = plans.model_limit(model_id, model_label)
+    if base is None:
+        return None
+    plan = plans.PLAN_BY_SLUG.get((member.get("tier") or "").strip().lower())
+    if not plan:
+        return base
+    base_daily, base_total = tier_limits(member)
+    out = []
+    for got, tier_value, table_value in ((base_daily, plan["daily"], base[0]),
+                                         (base_total, plan["weekly"], base[1])):
+        if tier_value and tier_value > 0:
+            out.append(table_value * (got / tier_value))
+        else:
+            out.append(table_value)
+    return (out[0], out[1])
+
+
 def tier_limits(member: dict) -> tuple[float, float]:
     """成员的 (日限额, 周限额)，单位元。
 
@@ -327,11 +356,24 @@ def model_quota(store, member: dict, models: dict[str, str],
     def limits_for(model_id: str, model_label: str) -> tuple[float, float]:
         # 额度按对外名字存：管理员在成员弹窗里看到的就是模型名，
         # 同一个模型背后可能有多条上游来源，按 id 存反而分不清。
+        # plans.UNLIMITED_MODELS 里的模型不参与额度：额度记 0，acc() 会跳过，
+        # 它的花费也就不推进池子。
+        if plans.unlimited(model_id, model_label):
+            return 0.0, 0.0
         ov = (overrides.get(model_label) or overrides.get(model_id) or {})
         daily = ov.get("limit_daily")
         total = ov.get("limit_total")
-        return (base_daily if daily is None else float(daily),
-                base_total if total is None else float(total))
+        # 成员级覆盖优先，其次 plans.MODEL_LIMITS 的逐模型默认，最后才是档位。
+        # 顺序不能反：管理员在弹窗里改过的数字必须赢过代码里的默认表。
+        if daily is None or total is None:
+            base = _scaled_model_limit(member, model_id, model_label)
+            if base is None:
+                base = (base_daily, base_total)
+            if daily is None:
+                daily = base[0]
+            if total is None:
+                total = base[1]
+        return (float(daily), float(total))
 
     # 只看 plan 通道：api 通道走另一本账，占同一份额度会重复计算
     today = store.member_model_summary(mid, since=day_start(),
@@ -468,12 +510,21 @@ def check_model_quota(store, member: dict | None, key: dict | None,
     if overrides is None:
         overrides = store.model_limits(member["id"])
     names = names or {}
+    if plans.unlimited(model):
+        return
     base_daily, base_total = tier_limits(member)
     ov = overrides.get(model) or {}
     limit_daily = ov.get("limit_daily")
     limit_total = ov.get("limit_total")
-    limit_daily = base_daily if limit_daily is None else float(limit_daily)
-    limit_total = base_total if limit_total is None else float(limit_total)
+    if limit_daily is None or limit_total is None:
+        default = _scaled_model_limit(member, model, model) or (base_daily,
+                                                               base_total)
+        if limit_daily is None:
+            limit_daily = default[0]
+        if limit_total is None:
+            limit_total = default[1]
+    limit_daily = float(limit_daily)
+    limit_total = float(limit_total)
     if limit_daily <= 0 and limit_total <= 0:
         return
 

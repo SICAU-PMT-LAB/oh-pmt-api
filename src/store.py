@@ -682,13 +682,18 @@ class Store:
             )
 
     def set_account_checkin(self, account_id: int, *, ok: bool, earned: float = 0,
-                            message: str = ""):
+                            message: str = "", claimed=None):
+        """记一次签到结果。claimed=False 表示这次压根没领到东西，
+
+        比如活动没开放或今日已签——这种不算「今天签过了」，checkin_at 不写，
+        否则面板上会因为国际版没有活动而永远显示已签到。
+        """
         with self._conn() as c:
             c.execute(
                 """UPDATE accounts SET checkin_at=?, checkin_ok=?, checkin_earned=?,
                    checkin_message=? WHERE id=?""",
-                (time.time(), 1 if ok else 0, float(earned or 0),
-                 message[:300], account_id),
+                (0 if claimed is False else time.time(),
+                 1 if ok else 0, float(earned or 0), message[:300], account_id),
             )
 
     def set_account_cooldown(self, account_id: int, seconds: int, error: str = ""):

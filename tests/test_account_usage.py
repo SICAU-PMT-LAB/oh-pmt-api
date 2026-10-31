@@ -161,13 +161,28 @@ class CheckinEarnedTest(unittest.TestCase):
         os.unlink(self.tmp.name)
 
     def _run(self, before_remaining, after_remaining, result):
+        """签到前后各同步一次：基准要现拉，不能用库里那份可能过期的快照。
+
+        第一次返回签到前的余量，第二次返回签到后的，模拟真实的两次拉取。
+        """
         self.store.set_account_credits(self.aid, total=300, used=0,
-                                       remaining=before_remaining, addon=0)
+                                       remaining=0, addon=0)
         acc = self.store.get_account(self.aid)
+        queue = [{"remaining": before_remaining}, {"remaining": after_remaining}]
         with mock.patch.object(server.qoder, "checkin_account", lambda a: result), \
              mock.patch.object(server, "sync_account_credits",
-                               lambda a: {"remaining": after_remaining}):
+                               lambda a: queue.pop(0) if queue else None):
             return server.checkin_one(acc)
+
+    def test_baseline_is_fetched_not_reused(self):
+        """库里存的是过期快照时，差额基准必须是签到前现拉的余量。
+
+        账号页那份快照可能是几小时前的，中间还在正常消耗；拿它当基准会把
+        真实消耗和签到奖励混在一起，算出负数或 0。
+        """
+        res = self._run(200, 300, {"ok": True, "declared": 100, "claimed": 1,
+                                   "done": True, "message": "已领取 1 个活动"})
+        self.assertEqual(res["earned"], 100)
 
     def test_earned_from_remaining_delta(self):
         res = self._run(200, 300, {"ok": True, "earned": 0, "declared": 100,
@@ -183,7 +198,7 @@ class CheckinEarnedTest(unittest.TestCase):
                                     "claimed": 1, "done": True,
                                     "message": "已领取 1 个活动"})
         self.assertEqual(res["earned"], 0)
-        self.assertIn("暂未变化", res["message"])
+        self.assertIn("尚未结算", res["message"])
 
     def test_already_checked_in_earns_nothing(self):
         res = self._run(200, 200, {"ok": True, "earned": 0, "declared": 0,

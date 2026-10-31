@@ -211,7 +211,7 @@ function render() {
           <div class="stat"><div class="num-big">
             <span data-count="${a.credits_remaining}" data-dec="1">0</span><small>积分</small></div>
             <div class="lbl">剩余额度</div></div>
-          <div class="hint">总额 ${fmtCompact(a.credits_total)} · 已用 ${fmtCompact(a.credits_used)}
+          <div class="hint">累计发放 ${fmtCompact(a.credits_total)} · 已用 ${fmtCompact(a.credits_used)}
             ${a.credits_expire_at ? '· ' + new Date(a.credits_expire_at * 1000).toLocaleDateString('zh-CN') + ' 到期' : ''}</div>
         </div>
       </div>
@@ -264,8 +264,8 @@ function render() {
           ${a.credits_shared_total > 0 ? `<span><i class="d" style="background:var(--ok)"></i>
             共享 ${fmtCompact(a.credits_shared_remaining)} / ${fmtCompact(a.credits_shared_total)}</span>` : ''}
         </div>
-        <div class="hint" style="margin-top:12px">已用
-          ${a.credits_total > 0 ? (usedPct * 100).toFixed(1) + '%' : '—'} ·
+        <div class="hint" style="margin-top:12px">累计已用
+          ${a.credits_total > 0 ? (usedPct * 100).toFixed(1) + '%' : '—'}（总额是累计发放量，含签到累加）·
           ${a.synced_ago == null ? '未同步过'
             : a.synced_ago < 90 ? a.synced_ago + ' 秒前同步'
             : a.synced_ago < 5400 ? Math.round(a.synced_ago / 60) + ' 分钟前同步'
@@ -392,8 +392,7 @@ function render() {
       const res = await api('/api/accounts/checkin', {
         method: 'POST', body: JSON.stringify({ id: a.id }) });
       const r = (res.results || [])[0];
-      toast(r ? `${r.message}${r.earned ? ' · 到账 ' + r.earned : ''}` : '已签到',
-            r && r.ok ? '' : 'err');
+      toast(r ? r.message : '已签到', r && r.ok ? '' : 'err');
       await load();
     } catch (e) { toast(e.message, 'err'); ck.disabled = false; ck.textContent = '签到'; }
   });

@@ -106,6 +106,79 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
 
+# 不设额度的模型：花多少都不推进额度池，也不会被单模型额度拦住。
+# 用显示名或上游 key 写都行，比对走 _norm。
+UNLIMITED_MODELS: tuple[str, ...] = ("hy3",)
+
+_UNLIMITED_INDEX = {_norm(k) for k in UNLIMITED_MODELS}
+
+
+def unlimited(*names: str) -> bool:
+    """这些名字（显示名或上游 key）里有没有「不限额」的模型。"""
+    return any(_norm(n) in _UNLIMITED_INDEX for n in names if n)
+
+
+# 档位之上的「按模型额度」：档位只决定总额，这里逐模型细分。
+# 值是 (日限额, 周限额)，单位元，与档位无关——四档共用同一套模型额度。
+# 写成一张表而不是只落到数据库里，新成员自动继承，plan 页也能算出同一组数。
+#
+# 没列到的模型沿用档位那一份（Go 5/25、Plus 15/75……）；
+# Hy3 在 UNLIMITED_MODELS 里，不参与额度，写进来也会被忽略。
+MODEL_LIMITS: dict[str, tuple[float, float]] = {
+    "deepseek-v4.1-flash": (20.0, 100.0),
+    "step-5-preview": (15.0, 75.0),
+    "glm-5.3-flash": (10.0, 50.0),
+    "minimax-m3.1-flash": (5.0, 25.0),
+    "mimo-v2.6-pro": (5.0, 25.0),
+    # 目录 id 是显示名转小写（带空格），与上游 key 差一个厂商前缀，
+    # 两种写法都要列，否则成员页查不到这张表、回退成档位 15/75。
+    "xiaomi mimo-v2.6-pro": (5.0, 25.0),
+    "kimi-k2.8-preview": (3.0, 15.0),
+    "deepseek-v4-pro": (3.0, 15.0),
+    "glm-5.3": (3.0, 15.0),
+    "hy4-preview": (3.0, 15.0),
+    "kimi-k3": (3.0, 15.0),
+    "kimi-k3.1-pro": (3.0, 15.0),
+    "qwen-3.8-flash": (3.0, 15.0),
+    "qwen-3.8-max": (3.0, 15.0),
+}
+
+_MODEL_LIMITS_BY_NORM = {_norm(k): v for k, v in MODEL_LIMITS.items()}
+
+
+def model_limit(*names: str) -> tuple[float, float] | None:
+    """按模型查「Plus 档」的额度，没配就返回 None（调用方回退到档位）。
+
+    依次按上游 key、模型 id、显示名匹配，与 profile_for 同一套顺序。
+    """
+    for name in names:
+        if not name:
+            continue
+        hit = _MODEL_LIMITS_BY_NORM.get(_norm(name))
+        if hit:
+            return hit
+    return None
+
+
+# MODEL_LIMITS 是 Plus 档的数字；其余档按档位金额与 Plus 的比例缩放，
+# 这样 Go 不至于和 Plus 拿到同一份额度，Pro/Max 也照旧更宽。
+_BASE_SLUG = "plus"
+
+
+def scale_for(budget_daily: float, budget_weekly: float,
+              names: tuple[str, ...]) -> tuple[float, float]:
+    """某个预算下这个模型分到的 (日, 周) 额度。
+
+    没配置的模型直接拿这份预算本身（即「按档位」），与改造前一致。
+    """
+    base = model_limit(*names)
+    ref = PLAN_BY_SLUG[_BASE_SLUG]
+    if base is None or not ref["daily"] or not ref["weekly"]:
+        return (budget_daily, budget_weekly)
+    return (base[0] * budget_daily / ref["daily"],
+            base[1] * budget_weekly / ref["weekly"])
+
+
 _PROFILE_BY_NORM = {_norm(k): v for k, v in REQUEST_PROFILES.items()}
 
 
@@ -187,6 +260,15 @@ def catalog(models: dict, overrides: dict | None = None) -> list[dict]:
         profile, profile_src = profile_for(upstream, mid, name)
         per_req = tokens_per_request(profile)
         welfare_only = bool(meta.get("welfare_only"))
+        # 不设额度的模型（Hy3）与福利来源一样：不占额度池，不改单模型额度，
+        # 所以请求次数没有上限。两者的区别只在来源标注（welfare）。
+        free_quota = welfare_only or unlimited(upstream, mid, name)
+        # 每个档位、每个模型自己的额度：MODEL_LIMITS 是 Plus 的数字，
+        # 其余档按预算比例缩放。表里的「周限额」列与预估值必须同源。
+        # 不限额的模型记 0（同 guard：0 表示不进池子），与前端画的 ∞ 一致。
+        limits = ({p["slug"]: (0.0, 0.0) for p in PLANS} if free_quota else
+                  {p["slug"]: scale_for(p["daily"], p["weekly"],
+                                        (upstream, mid, name)) for p in PLANS})
         row = {
             "id": mid,
             "name": name,
@@ -207,19 +289,29 @@ def catalog(models: dict, overrides: dict | None = None) -> list[dict]:
             # 前端据此在预测图上把它标成「临时 · 额度无限」。混合来源的
             # 模型不算——它还有正常账号在跑，额度照常受限。
             "welfare": bool(meta.get("welfare_only")),
-            # 只由福利账号提供的模型不扣成员额度，请求次数就是无限。
-            # 用 None 表示，和「单价为 0 的免费模型」同一种表示法。
-            "daily": ({p["slug"]: None for p in PLANS} if welfare_only else
+            # 不限额：界面把这一行画成满格，不代表它的额度用完了
+            "unlimited": unlimited(upstream, mid, name),
+            # 每个档位下这个模型的日/周额度，单位元。与 guard 判定用的
+            # 同一套数字，不能用档位金额代替：Plus 是 15/75，而各模型
+            # 实际是 20/100、3/15 这些。
+            "limits": {slug: {"daily": v[0], "weekly": v[1]}
+                       for slug, v in limits.items()},
+            # 只由福利账号提供、或不设额度的模型不扣成员额度，请求次数就是
+            # 无限。用 None 表示，和「单价为 0 的免费模型」同一种表示法。
+            "daily": ({p["slug"]: None for p in PLANS} if free_quota else
                       {p["slug"]: requests_for_budget(
-                          p["daily"], price, profile) for p in PLANS}),
-            "weekly": ({p["slug"]: None for p in PLANS} if welfare_only else
+                          limits[p["slug"]][0], price, profile)
+                       for p in PLANS}),
+            "weekly": ({p["slug"]: None for p in PLANS} if free_quota else
                        {p["slug"]: requests_for_budget(
-                           p["weekly"], price, profile) for p in PLANS}),
+                           limits[p["slug"]][1], price, profile)
+                        for p in PLANS}),
             # 每周能烧掉的 token 总量 = 每周请求数 × 每请求 token
             "weekly_tokens": ({p["slug"]: None for p in PLANS}
-                              if welfare_only else
+                              if free_quota else
                               {p["slug"]: _weekly_tokens(
-                                  requests_for_budget(p["weekly"], price, profile),
+                                  requests_for_budget(
+                                      limits[p["slug"]][1], price, profile),
                                   per_req) for p in PLANS}),
         }
         rows.append(row)

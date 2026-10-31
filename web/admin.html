@@ -618,7 +618,7 @@ async function loadOverview() {
     document.getElementById('ov-kpi').innerHTML =
       kid('账号额度余量',
           `<span data-count="${STATUS.credits_remaining}" data-dec="1">0</span><small>上游积分</small>`,
-          `总额 ${fmtCompact(STATUS.credits_total)} · 已用 ${fmtCompact(STATUS.credits_used)}`) +
+          `累计发放 ${fmtCompact(STATUS.credits_total)} · 已用 ${fmtCompact(STATUS.credits_used)}`) +
       kid('可用账号', `<span data-count="${STATUS.available}" data-dec="0">0</span><small>/ ${STATUS.accounts}</small>`,
           `${stats.filter(s => s.accounts > 0).length} 家厂商在跑`) +
       kid('成员', `<span data-count="${STATUS.members}" data-dec="0">0</span><small>人</small>`,
@@ -641,7 +641,7 @@ async function loadOverview() {
         <div class="stat"><div class="num-big">${fmtCompact(STATUS.credits_remaining)}<small>上游积分</small></div>
           <div class="lbl">全部账号剩余</div></div>
         <div class="hint" style="margin-top:10px">已用 ${fmtCompact(STATUS.credits_used)} /
-          总额 ${fmtCompact(STATUS.credits_total)}</div>
+          累计发放 ${fmtCompact(STATUS.credits_total)}</div>
       </div>`;
     ringChart(document.getElementById('ring-slot'),
       { value: STATUS.credits_remaining, total: STATUS.credits_total || 1, size: 120, label: 'REMAINING' });
@@ -740,7 +740,7 @@ function renderProviderCards() {
         <div data-w="${usedPct.toFixed(1)}"></div>
       </div>
       <div class="pc-foot">
-        <span class="pc-lbl">已用 ${fmtCompact(st.credits_used)} / ${fmtCompact(st.credits_total)}</span>
+        <span class="pc-lbl">已用 ${fmtCompact(st.credits_used)} / 累计发放 ${fmtCompact(st.credits_total)}</span>
         <span class="pc-go">${pending ? '查看接入说明 →' : '查看账号 →'}</span>
       </div>
     </div>`;
@@ -812,9 +812,11 @@ function renderCheckin(res) {
     return;
   }
   box.innerHTML = `<div class="card" style="border-color:var(--gold-line)">
-    <h3 class="section">签到结果 · 共到账 ${Number(res.earned || 0).toFixed(0)} 积分</h3>
+    <h3 class="section">签到结果 · 共到账 ${Number(res.earned || 0).toFixed(2).replace(/\.?0+$/, '')} 积分</h3>
     ${res.results.map(r => `<div class="checkin-line ${r.ok ? 'ok' : 'err'}">
       ${r.ok ? '✓' : '✕'} <b>${esc(r.name)}</b>　${esc(r.message || '')}</div>`).join('')}
+    <div class="note" style="margin-top:10px">上游积分结算有 1-2 分钟延迟，
+      显示「到账尚未结算」的账号过一会儿点一次「同步额度」即可看到余量。</div>
   </div>`;
 }
 
@@ -1265,18 +1267,22 @@ document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('clic
    ——那样调整日限额会把周限额一起钉死在一个具体数字上。 */
 let modelLimits = {};       // {模型名: {daily, total}}，只含真正改过的窗口
 let modelLimitSaved = {};   // 打开弹窗时的快照，用来判断哪些模型被隐藏了
-// 这个成员实际的日 / 周额度基线。等于档位值时就是档位，被管理员手工
-// 覆盖过时是覆盖值（老数据里常见 15 / 100，而 plus 档本身是 15 / 75）。
-// 占位提示必须以此为准，否则界面写「周 75」而留空实际得到 100。
+// 每个模型实际的默认额度（来自额度树），键是模型名。按模型额度是逐模型
+// 存的（deepseek 20/100、kimi 3/15），不能再拿档位金额当占位提示，
+// 否则界面写「留空得到 15」而实际得到 20。新建成员时这里是空的。
+let modelEffective = {};
+// 这个成员实际的总量基线。等于档位值时就是档位，被管理员手工覆盖过时
+// 是覆盖值（老数据里常见 15 / 100，而 plus 档本身是 15 / 75）。
+// 只用作没有逐模型数据时的兼底。
 let limitBase = null;       // {daily, total, manual: {daily, total}}
 
 function renderModelLimits(tier) {
   const box = document.getElementById('m-limits');
   const plan = (PLANS || []).find(p => p.slug === tier) || {};
-  // 占位提示写的是「留空会得到多少」：编辑已有成员时用它的真实基线，
-  // 新建成员时才用档位值。成员级手工覆盖过时两者会不一样。
-  const planDaily = limitBase ? Number(limitBase.daily || 0) : Number(plan.daily || 0);
-  const planTotal = limitBase ? Number(limitBase.total || 0) : Number(plan.weekly || 0);
+  // 占位提示写的是「留空会得到多少」。优先用这个模型自己的生效额度；
+  // 没有（新建成员、或目录里刚加的模型）才回退到成员基线与档位。
+  const baseDaily = limitBase ? Number(limitBase.daily || 0) : Number(plan.daily || 0);
+  const baseTotal = limitBase ? Number(limitBase.total || 0) : Number(plan.weekly || 0);
   // 只列这个成员能用的模型；一个都没选就是全都能用
   const allowedNames = new Set(MODELS.filter(m =>
     !pickedModels.size ||
@@ -1294,8 +1300,11 @@ function renderModelLimits(tier) {
     </div>` + rows.map(m => {
     const cur = modelLimits[m.name] || {};
     const over = cur.daily != null || cur.total != null;
-    // 留空表示跟随这个成员当前的额度基线（一般是档位，被手工覆盖过时
-    // 是覆盖值）。写「档位」在覆盖过的成员上会与上面的数字自相矛盾。
+    const eff = modelEffective[m.name];
+    const planDaily = eff && eff.daily != null ? Number(eff.daily) : baseDaily;
+    const planTotal = eff && eff.total != null ? Number(eff.total) : baseTotal;
+    // 留空表示跟随这个模型的生效额度（一般是代码里的逐模型默认，被
+    // 手工改过时是覆盖值）。写「档位」在覆盖过的成员上会自相矛盾。
     const mark = (v, planVal) => v != null
       ? '<span class="limit-tag">已改</span>'
       : `<span class="limit-tag muted">${planVal > 0 ? '跟随' : '不限'}</span>`;
@@ -1413,6 +1422,7 @@ window.openMemberModal = async () => {
   activeVendor = null;
   modelLimits = {};
   modelLimitSaved = {};
+  modelEffective = {};
   limitBase = null;
   renderBaseHint();
   renderModelChips();
@@ -1529,6 +1539,7 @@ window.editMember = async (id) => {
   // model_quota_editable（目录里的模型 + 只含真正改过的窗口）。
   modelLimits = {};
   modelLimitSaved = {};
+  modelEffective = {};
   limitBase = null;
   try {
     const d = await api('/api/members/' + id);
@@ -1540,6 +1551,12 @@ window.editMember = async (id) => {
       renderBaseHint();
     }
     (d.model_quota_editable || []).forEach(r => {
+      // 每个模型自己的生效额度，用作占位提示：逐模型额度是分开存的，
+      // 拿成员总额当占位会写出「留空得到 15」而实际是 20 这种骗人的提示
+      if (r.effective_daily != null || r.effective_total != null) {
+        modelEffective[r.name] = {
+          daily: r.effective_daily, total: r.effective_total };
+      }
       if (!r.overridden) return;
       // 未改过的那一个窗口是 null，不是 0，也不要拿生效值填回去
       const cell = {};

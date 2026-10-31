@@ -83,12 +83,12 @@
     <section data-component="hero">
       <div data-component="desktop-app-banner">
         <span data-slot="badge">新</span>
-        <div data-slot="content"><span data-slot="text">DeepSeek-V4.1-Flash 已支持四级思考档位。</span></div>
+        <div data-slot="content"><span data-slot="text">DeepSeek-V4.1-Flash Plus 额度提升 33.33%。</span></div>
       </div>
       <div data-slot="hero-copy">
         <div data-slot="headline">
-          <h1>独属川农人的低成本编程模型</h1>
-          <p>Prometheus Lab 社团致力于让每一个川农人都能跟上 AI 时代的浪潮，尽全力持续提供充裕的限额和对最强大开源模型的可靠访问，让您可以利用强大的 Agent 执行任务，而无需担心成本与可用性。</p>
+          <h1>独属川农人的编程模型</h1>
+          <p>Prometheus Lab 社团致力于让每一个川农人都能跟上 AI 时代的浪潮，尽全力持续提供充裕的限额和对最强大开源模型的可靠访问，让你可以利用强大的 Agent 执行任务，而无需担心成本与可用性。</p>
         </div>
         <div data-slot="model-logos" aria-label="可用模型厂商">
           <div data-slot="logo-marquee" id="model-logos"></div>
@@ -117,8 +117,7 @@
                 <th scope="col">模型</th>
                 <th scope="col" colspan="2"><span data-slot="th-long">预估请求数 / 每日</span><span data-slot="th-short">每日</span></th>
                 <th scope="col"><span data-slot="th-long">每周请求</span><span data-slot="th-short">每周</span></th>
-                <th scope="col" id="quota-limit-head"><span data-slot="th-long">周限额</span><span data-slot="th-short">限额</span></th>
-              </tr>
+                <th scope="col" id="quota-limit-head"><span data-slot="th-long">周限额</span><span data-slot="th-short">限额</span></th>              </tr>
             </thead>
             <tbody id="quota-body"></tbody>
             <tfoot id="quota-foot">
@@ -298,8 +297,12 @@ function weeklyTokens(model, tierSlug) {
   return v === null ? null : (v || 0);
 }
 
-function weekLimit(tierSlug) {
-  // 周限额就是这一档的周预算金额，随档位切换；后端没给就显示 ∞。
+function weekLimit(model, tierSlug) {
+  // 周限额是「这个模型在这档分到的额度」，不是档位总预算。
+  // 后端给的 limits 与网关拦截用的同一套数字（deepseek 20/100、kimi 3/15），
+  // 拿档位的 weekly 填这一列会写成 75，而实际一用到 15 就被拦。
+  const lim = model.limits && model.limits[tierSlug];
+  if (lim && lim.weekly > 0) return '¥' + fmtInt(lim.weekly);
   const plan = DATA.plans.find((p) => p.slug === tierSlug);
   const v = plan && plan.weekly;
   return typeof v === 'number' && v > 0 ? '¥' + fmtInt(v) : UNLIMITED;
@@ -357,8 +360,10 @@ function renderTierSwitch() {
 function renderTable() {
   const rows = DATA.models;
   const shown = expanded ? rows : rows.slice(0, 12);
-  // 单价全为 0 的模型请求数是 null，不参与量程，条形直接画满
-  const maxReq = Math.max(...shown.map((m) => m.daily[tier] || 0), 1);
+  // 量程按全部模型算，不能按当前展示的那几行算：收起时只画前 12 行，
+  // 用这 12 行求最大值得出的比例，展开后会跟着重排，同一根进度条先满后
+  // 缩一半。刻度也一样，必须与展示行无关。
+  const maxReq = Math.max(...rows.map((m) => m.daily[tier] || 0), 1);
   // 刻度取 1/2/5 的幂次档，再从大到小挑三个间距足够大的，
   // 否则像 1 和 10 这种在当前量程里会挤在同一像素上，标签叠在一起。
   const axis = [];
@@ -382,7 +387,10 @@ function renderTable() {
     // 所以既要显示 ∞，也要标出「临时」。已经由正常账号支持的模型不带
     // 这个标记（后端 welfare=false），避免预测图凭空多一行。
     const welfareTag = m.welfare ? '<small>临时</small>' : '';
-    const freeTag = free ? '<small>免费</small>' : '';
+    // 不限额与免费是两回事：前者是「不占额度池」（Hy3），后者是单价为 0。
+    // 两者都算不出请求数，但标签要说清楚，否则读者会以为是免费模型。
+    const freeTag = m.unlimited ? '<small>不限额</small>'
+      : free ? '<small>免费</small>' : '';
     return `
       <tr>
         <th scope="row"><bdi>${esc(m.name)}</bdi>
@@ -398,7 +406,8 @@ function renderTable() {
         </td>
         <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(n)}</span></td>
         <td data-slot="number"><span>${free ? UNLIMITED : fmtInt(weekReq)}</span></td>
-        <td data-slot="number"><span>${m.welfare ? UNLIMITED : weekLimit(tier)}</span></td>
+        <td data-slot="number"><span>${m.welfare || m.unlimited
+          ? UNLIMITED : weekLimit(m, tier)}</span></td>
       </tr>`;
   }).join('');
 
